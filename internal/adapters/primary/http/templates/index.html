@@ -1,0 +1,300 @@
+{{define "index.html"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kanban Board</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+  <style>
+    :root { --bg:#0f1720; --panel:#182430; --card:#22323f; --text:#e8eef4; --muted:#8fa3b3; --accent:#4c9aff; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+           background:var(--bg); color:var(--text); }
+    header { padding:24px 28px 8px; }
+    header h1 { margin:0; font-size:20px; letter-spacing:.2px; }
+    header p { margin:4px 0 0; color:var(--muted); font-size:13px; }
+    #flash { color:#ffb4b4; }
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; padding:16px 28px 0; }
+    .toolbar form { display:flex; gap:8px; flex:1 1 320px; }
+    .toolbar input[type=text] { flex:1; }
+    .toolbar input[type=file] { color:var(--muted); padding:7px; max-width:220px; }
+    .toolbar .io { display:flex; align-items:center; }
+    .toolbar .io a.export { padding:8px 12px; border-radius:8px; border:1px solid #2c3d4c;
+                            background:var(--card); color:var(--text); text-decoration:none; }
+    .toolbar .io a.export:hover { border-color:var(--accent); }
+    input, select, textarea, button { font:inherit; border-radius:8px; border:1px solid #2c3d4c; background:var(--card);
+                            color:var(--text); padding:8px 10px; }
+    textarea { width:100%; resize:vertical; }
+    button { cursor:pointer; }
+    button:hover { border-color:var(--accent); }
+    #board { display:flex; gap:16px; padding:20px 28px 40px; align-items:flex-start; }
+    .column { background:var(--panel); border-radius:12px; padding:12px; min-height:180px;
+              flex:1 0 260px; max-width:340px; }
+    .column h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted);
+                 display:flex; align-items:center; gap:8px; }
+    .column h2 .name { flex:1; }
+    .column h2 form { margin:0; }
+    .column h2 button { padding:2px 6px; font-size:11px; color:var(--muted); background:transparent; }
+    .column h2.renaming { display:flex; align-items:center; gap:6px; }
+    .column h2.renaming form { flex:1; display:flex; gap:6px; }
+    .column h2.renaming input[type=text] { flex:1; min-width:0; font-size:12px; padding:4px 8px;
+                                            text-transform:none; letter-spacing:normal; }
+    .column h2.renaming button { padding:2px 6px; font-size:11px; }
+
+    .cards { display:flex; flex-direction:column; gap:10px; }
+    .card { background:var(--card); border-radius:10px; padding:10px 12px; border-left:4px solid #3b4d5c; }
+    .card.prio-High { border-left-color:#ff6b6b; }
+    .card.prio-Medium { border-left-color:#ffc761; }
+    .card.prio-Low { border-left-color:#5ac8a8; }
+    .card h3 { margin:0 0 6px; font-size:14px; font-weight:600; }
+    .card .desc { margin:0 0 6px; font-size:13px; opacity:.85; white-space:pre-wrap; }
+    .field { margin:0 0 6px; font-size:12px; color:var(--muted); white-space:pre-wrap; }
+    .field span { display:block; text-transform:uppercase; letter-spacing:.06em; font-size:10px; opacity:.8; }
+    .blocked { margin:0 0 6px; font-size:12px; color:#ffc761; }
+    .blocked::before { content:"🔒 "; }
+    .meta { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .badge { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+    .moves { display:flex; gap:6px; align-items:center; }
+    .moves form { margin:0; }
+    .moves button { padding:3px 8px; font-size:11px; }
+    .moves button.locked { opacity:.45; cursor:not-allowed; }
+    .card-form label { display:block; margin:0 0 8px; font-size:11px; color:var(--muted);
+                       text-transform:uppercase; letter-spacing:.06em; }
+    .card-form input, .card-form select, .card-form textarea { width:100%; margin-top:3px;
+                       text-transform:none; letter-spacing:normal; }
+    .card-form .row { display:flex; gap:8px; }
+    .card-form .row label { flex:1; }
+    .card-form .deps { border:1px solid #2c3d4c; border-radius:8px; padding:6px 10px 8px; margin:0 0 8px; }
+    .card-form .deps legend { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); padding:0 4px; }
+    .card-form .dep { display:flex; align-items:center; gap:6px; margin:3px 0; font-size:12px;
+                      text-transform:none; letter-spacing:normal; }
+    .card-form .dep input { width:auto; margin:0; }
+    .card-form .dep .dep-title { flex:1; color:var(--text); }
+    .form-actions { display:flex; gap:8px; margin-top:4px; }
+    .form-actions button { flex:1; font-size:12px; }
+    .form-actions button[type=submit] { border-color:var(--accent); }
+    .empty { color:var(--muted); font-size:12px; font-style:italic; }
+    .boardbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; width:100%; margin-bottom:6px; }
+    .shell { display:flex; gap:16px; padding:20px 28px 40px; align-items:flex-start; }
+    .sidebar { flex:0 0 190px; background:var(--panel); border-radius:12px; padding:12px;
+               display:flex; flex-direction:column; gap:10px; position:sticky; top:12px; }
+    .side-title { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+    .boards { display:flex; flex-direction:column; gap:4px; }
+    .board-tab { display:block; padding:7px 10px; border-radius:8px; color:var(--text);
+                 text-decoration:none; font-size:13px; border:1px solid transparent; }
+    .board-tab:hover { background:var(--card); }
+    .board-tab.active { background:var(--card); border-color:var(--accent); font-weight:600; }
+    .newboard { display:flex; gap:6px; }
+    .newboard input[type=text] { flex:1; min-width:0; font-size:12px; padding:6px 8px; }
+    .newboard button { padding:6px 9px; font-size:12px; }
+    .newboard .danger { width:100%; color:#ffb4b4; border-color:#5a2d31; }
+    .newboard .danger:hover { border-color:#ff6b6b; }
+    .sidebar hr { width:100%; border:none; border-top:1px solid #2c3d4c; margin:2px 0; }
+    .addcolumn { display:flex; gap:6px; width:100%; }
+    .addcolumn input[type=text] { flex:1; min-width:0; font-size:12px; padding:6px 8px; }
+    .addcolumn button { padding:6px 9px; font-size:12px; }
+    .cards-area { display:flex; gap:16px; overflow-x:auto; flex:1; align-items:flex-start; padding-bottom:4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Kanban Board</h1>
+    <p>A card can only reach the next column when its constraints are one stage behind.</p>
+    <p id="flash" role="status"></p>
+  </header>
+
+  <div class="toolbar">
+    <form action="/cards" method="post" hx-post="/cards" hx-target="#board" hx-swap="outerHTML">
+      <input type="text" name="title" placeholder="New card title…" required>
+      <select name="priority">
+        <option value="Low">Low</option>
+        <option value="Medium" selected>Medium</option>
+        <option value="High">High</option>
+      </select>
+      <button type="submit">Add card</button>
+    </form>
+    <form action="/import.json" method="post" enctype="multipart/form-data"
+          hx-post="/import.json" hx-encoding="multipart/form-data"
+          hx-target="#board" hx-swap="outerHTML">
+      <input type="file" name="file" accept=".json,application/json" required>
+      <button type="submit">Load a board…</button>
+    </form>
+    <div class="io">
+      <a href="/export.json" download="kanban-board.json" class="export">Export JSON</a>
+    </div>
+  </div>
+
+  {{template "board" .}}
+
+  <script>
+    // HTMX keeps the old board on a 4xx/5xx response: surface the reason instead.
+    document.body.addEventListener('htmx:responseError', function (e) {
+      document.getElementById('flash').textContent = e.detail.xhr.responseText.trim();
+    });
+  </script>
+</body>
+</html>
+{{end}}
+
+{{define "board"}}
+<main id="board" class="shell">
+  <aside class="sidebar">
+    <div class="side-title">Boards</div>
+    <nav class="boards">
+      {{range .Boards}}
+      <a class="board-tab{{if eq .ID $.BoardID}} active{{end}}" href="/?board={{.ID}}" title="Open this board">{{.Name}}</a>
+      {{end}}
+    </nav>
+    <form action="/boards" method="post" hx-post="/boards" hx-target="#board" hx-swap="outerHTML" class="newboard">
+      <input type="text" name="name" placeholder="New board…" required>
+      <button type="submit" title="Create a board">+</button>
+    </form>
+    {{if gt (len .Boards) 1}}
+    <form action="/boards/{{.Board.ID}}/delete" method="post" hx-post="/boards/{{.Board.ID}}/delete"
+          hx-target="#board" hx-swap="outerHTML" class="newboard"
+          hx-confirm="Delete the board “{{.Board.Name}}”? Its cards go with it.">
+      <button type="submit" class="danger" title="Delete this board">Delete this board</button>
+    </form>
+    {{end}}
+    {{if .BoardID}}
+    <hr>
+    <div class="side-title">Columns</div>
+    <form class="addcolumn" action="/columns" method="post" hx-post="/columns" hx-target="#board" hx-swap="outerHTML">
+      <input type="text" name="name" placeholder="New column…" required>
+      <button type="submit" title="Add a column at the end of the board">+</button>
+    </form>
+    {{end}}
+  </aside>
+  <div class="cards-area">
+  {{range .Columns}}
+  <section class="column">
+    {{template "column-head" .}}
+    <div class="cards">
+      {{range .Cards}}{{template "card" .}}{{else}}<p class="empty">No cards</p>{{end}}
+    </div>
+  </section>
+  {{else}}
+  <p class="empty">This board has no column yet: add one on the left.</p>
+  {{end}}
+  {{if not .Boards}}<p class="empty">No board yet.</p>{{end}}
+  </div>
+</main>
+{{end}}
+
+{{define "column-head"}}
+<h2>
+  <span class="name">{{.Column.Name}}</span>
+  <span>{{len .Cards}}</span>
+  <button type="button" hx-get="/columns/{{.Column.ID}}/rename" hx-target="closest h2" hx-swap="outerHTML"
+          title="Rename this column">✎</button>
+  {{if .CanDelete}}
+  <form action="/columns/{{.Column.ID}}/delete" method="post" hx-post="/columns/{{.Column.ID}}/delete"
+        hx-target="#board" hx-swap="outerHTML"
+        hx-confirm="Delete the column “{{.Column.Name}}”? Its cards move to the previous column.">
+    <button type="submit" title="Delete this column">✕</button>
+  </form>
+  {{end}}
+</h2>
+{{end}}
+
+{{define "column-head-edit"}}
+<h2 class="renaming">
+  <form action="/columns/{{.Column.ID}}/rename" method="post" hx-post="/columns/{{.Column.ID}}/rename"
+        hx-target="#board" hx-swap="outerHTML">
+    <input type="text" name="name" value="{{.Column.Name}}" required>
+    <button type="submit" title="Save the new name">✓</button>
+  </form>
+  <button type="button" hx-get="/columns/{{.Column.ID}}" hx-target="closest h2" hx-swap="outerHTML"
+          title="Keep the current name">↩</button>
+</h2>
+{{end}}
+
+{{define "card"}}
+<article class="card prio-{{.Priority}}">
+  <h3>{{.Title}}</h3>
+  {{if .Description}}<p class="desc">{{.Description}}</p>{{end}}
+  {{if .Objective}}<p class="field"><span>Objective</span>{{.Objective}}</p>{{end}}
+  {{if .Blockers}}<p class="blocked">Blocked by {{range $i, $b := .Blockers}}{{if $i}}, {{end}}{{$b.Title}}{{end}}</p>{{end}}
+  {{if .Teamed}}<p class="blocked">{{range $i, $t := .Teamed}}{{if $i}}, {{end}}{{$t.Title}}{{end}} still wait{{if eq (len .Teamed) 1}}s{{end}} for this card</p>{{end}}
+  <div class="meta">
+    <span class="badge">{{.Priority}}</span>
+    <div class="moves">
+      {{if .Prev}}
+      <form action="/cards/move" method="post" hx-post="/cards/move" hx-target="#board" hx-swap="outerHTML">
+        <input type="hidden" name="card_id" value="{{.ID}}">
+        <input type="hidden" name="column_id" value="{{.Prev.ID}}">
+        <button type="submit" title="Back to {{.Prev.Name}}">◀ {{.Prev.Name}}</button>
+      </form>
+      {{end}}
+      {{if .Next}}
+        {{if .Blockers}}
+        <button class="locked" type="button" disabled title="Finish the constraints first">🔒 {{.Next.Name}}</button>
+        {{else if .Teamed}}
+        <button class="locked" type="button" disabled title="The cards that depend on this one must move first">🔒 {{.Next.Name}}</button>
+        {{else}}
+        <form action="/cards/move" method="post" hx-post="/cards/move" hx-target="#board" hx-swap="outerHTML">
+          <input type="hidden" name="card_id" value="{{.ID}}">
+          <input type="hidden" name="column_id" value="{{.Next.ID}}">
+          <button type="submit" title="Advance to {{.Next.Name}}">{{.Next.Name}} ▶</button>
+        </form>
+        {{end}}
+      {{end}}
+      <button class="edit" type="button" hx-get="/cards/{{.ID}}/edit" hx-target="closest article" hx-swap="outerHTML">Edit</button>
+      <form action="/cards/{{.ID}}/delete" method="post" hx-post="/cards/{{.ID}}/delete" hx-target="#board" hx-swap="outerHTML"
+            hx-confirm="Delete the card “{{.Title}}”? Cards depending on it lose this constraint.">
+        <button type="submit" title="Delete this card">Delete</button>
+      </form>
+    </div>
+  </div>
+</article>
+{{end}}
+
+{{define "card-form"}}
+<article class="card prio-{{.Priority}} card-form">
+  <form action="/cards/{{.ID}}" method="post" hx-post="/cards/{{.ID}}" hx-target="#board" hx-swap="outerHTML">
+    <label>Title
+      <input type="text" name="title" value="{{.Title}}" required>
+    </label>
+    <label>Description
+      <textarea name="description" rows="2" placeholder="What is this card about?">{{.Description}}</textarea>
+    </label>
+    <label>Objective
+      <textarea name="objective" rows="2" placeholder="What does done look like?">{{.Objective}}</textarea>
+    </label>
+    <fieldset class="deps">
+      <legend>Constraints — cards to finish first</legend>
+      <input type="hidden" name="depends_on" value="">
+      {{range .Candidates}}
+      <label class="dep">
+        <input type="checkbox" name="depends_on" value="{{.ID}}"{{if $.Selected .ID}} checked{{end}}>
+        <span class="dep-title">{{.Title}}</span>
+        <span class="badge">{{$.ColumnName .ColumnID}}</span>
+      </label>
+      {{else}}
+      <p class="empty">No other card to depend on yet</p>
+      {{end}}
+    </fieldset>
+    <div class="row">
+      <label>Column
+        <select name="column_id">
+          {{$selected := .ColumnID}}
+          {{range .Columns}}
+          <option value="{{.ID}}"{{if eq .ID $selected}} selected{{end}}>{{.Name}}</option>
+          {{end}}
+        </select>
+      </label>
+      <label>Priority
+        <select name="priority">
+          <option value="Low"{{if eq .Priority "Low"}} selected{{end}}>Low</option>
+          <option value="Medium"{{if eq .Priority "Medium"}} selected{{end}}>Medium</option>
+          <option value="High"{{if eq .Priority "High"}} selected{{end}}>High</option>
+        </select>
+      </label>
+    </div>
+    <div class="form-actions">
+      <button type="submit">Save</button>
+      <button type="button" hx-get="/cards/{{.ID}}" hx-target="closest article" hx-swap="outerHTML">Cancel</button>
+    </div>
+  </form>
+</article>
+{{end}}

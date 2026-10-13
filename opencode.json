@@ -1,0 +1,18 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["README.md"],
+  "command": {
+    "test": {
+      "description": "Run the architecture test harness",
+      "command": "go test ./harness/... ./internal/... -count=1"
+    },
+    "build": {
+      "description": "Build the server binary",
+      "command": "go build -o bin/server ./cmd/server"
+    },
+    "vet": {
+      "description": "Run go vet on the whole module",
+      "command": "go vet ./..."
+    }
+  }
+}

@@ -1,0 +1,11 @@
+bin/
+
+# Local SQLite database — runtime data, not source
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Google Cloud service-account keys — never commit credentials
+service-account*.json
+*-[0-9a-f]*-[0-9a-f]*.json
