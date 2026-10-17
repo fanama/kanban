@@ -210,19 +210,27 @@ type PullStep struct {
 // constraints have not reached it, in which case the plan reports an error: the
 // move must be refused, since c could not be pulled along either.
 func PullPlan(c Card, targetPosition int, b BoardView) ([]PullStep, error) {
+	positions := cardPositions(b)
+	positions[c.ID] = targetPosition
+
+	moved := c
+	moved.ColumnID = b.Columns[targetPosition].Column.ID
+	return pullSteps(b, moved, positions)
+}
+
+func cardPositions(b BoardView) map[string]int {
 	positions := make(map[string]int, b.Count())
 	for _, column := range b.Columns {
 		for _, card := range column.Cards {
 			positions[card.ID] = column.Column.Position
 		}
 	}
-	positions[c.ID] = targetPosition
+	return positions
+}
 
-	moved := c
-	moved.ColumnID = b.Columns[targetPosition].Column.ID
-
+func pullSteps(b BoardView, moved Card, positions map[string]int) ([]PullStep, error) {
 	queue := []Card{moved}
-	seen := map[string]bool{c.ID: true}
+	seen := map[string]bool{moved.ID: true}
 	plan := make([]PullStep, 0)
 
 	for len(queue) > 0 {

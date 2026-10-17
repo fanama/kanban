@@ -23,10 +23,10 @@ type memoryBoard struct {
 }
 
 type memoryRepo struct {
-	mu      sync.RWMutex
-	boards  []domain.Board
-	byID    map[string]*memoryBoard
-	cards   map[string]domain.Card // global: one ID never means two cards
+	mu     sync.RWMutex
+	boards []domain.Board
+	byID   map[string]*memoryBoard
+	cards  map[string]domain.Card // global: one ID never means two cards
 }
 
 var _ ports.BoardRepository = (*memoryRepo)(nil)

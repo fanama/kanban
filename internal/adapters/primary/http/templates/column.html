@@ -1,0 +1,29 @@
+{{define "column-head"}}
+<h2 class="column-head">
+  <span class="name">{{.Column.Name}}</span>
+  <span class="count" aria-label="{{len .Cards}} cards">{{len .Cards}}</span>
+  <span class="column-actions">
+    <button type="button" class="icon-button subtle" hx-get="/columns/{{.Column.ID}}/rename" hx-target="closest h2" hx-swap="outerHTML"
+            title="Rename this list" aria-label="Rename this list">✎</button>
+    {{if .CanDelete}}
+    <form action="/columns/{{.Column.ID}}/delete" method="post" hx-post="/columns/{{.Column.ID}}/delete"
+          hx-target="#board" hx-swap="outerHTML"
+          hx-confirm="Delete the list “{{.Column.Name}}”? Its cards move to the previous list.">
+      <button type="submit" class="icon-button subtle" title="Delete this list" aria-label="Delete this list">✕</button>
+    </form>
+    {{end}}
+  </span>
+</h2>
+{{end}}
+
+{{define "column-head-edit"}}
+<h2 class="column-head renaming">
+  <form action="/columns/{{.Column.ID}}/rename" method="post" hx-post="/columns/{{.Column.ID}}/rename"
+        hx-target="#board" hx-swap="outerHTML" class="rename-form">
+    <input type="text" name="name" value="{{.Column.Name}}" aria-label="List name" required>
+    <button type="submit" class="icon-button subtle" title="Save the new name" aria-label="Save the new name">✓</button>
+  </form>
+  <button type="button" class="icon-button subtle" hx-get="/columns/{{.Column.ID}}" hx-target="closest h2" hx-swap="outerHTML"
+          title="Keep the current name" aria-label="Cancel renaming">↩</button>
+</h2>
+{{end}}

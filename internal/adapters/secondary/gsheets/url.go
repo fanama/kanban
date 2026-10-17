@@ -29,17 +29,28 @@ func ParseSpreadsheetURL(raw string) (spreadsheetID string, gid *int64, err erro
 		return "", nil, fmt.Errorf("gsheets: parse spreadsheet URL: %w", err)
 	}
 
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	spreadsheetID, err = spreadsheetIDFromPath(u.Path, raw)
+	if err != nil {
+		return "", nil, err
+	}
+	gid, err = parseGID(u)
+	if err != nil {
+		return "", nil, err
+	}
+	return spreadsheetID, gid, nil
+}
+
+func spreadsheetIDFromPath(path, raw string) (string, error) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
 	for i, p := range parts {
 		if p == "d" && i+1 < len(parts) {
-			spreadsheetID = parts[i+1]
-			break
+			return parts[i+1], nil
 		}
 	}
-	if spreadsheetID == "" {
-		return "", nil, fmt.Errorf("gsheets: no spreadsheet ID in URL %q", raw)
-	}
+	return "", fmt.Errorf("gsheets: no spreadsheet ID in URL %q", raw)
+}
 
+func parseGID(u *url.URL) (*int64, error) {
 	// The gid is usually the URL fragment, sometimes the "gid" query value.
 	rawGID := u.Fragment
 	if rawGID == "" {
@@ -47,12 +58,12 @@ func ParseSpreadsheetURL(raw string) (spreadsheetID string, gid *int64, err erro
 	}
 	rawGID = strings.TrimPrefix(rawGID, "gid=")
 	if rawGID == "" {
-		return spreadsheetID, nil, nil
+		return nil, nil
 	}
 
 	v, err := strconv.ParseInt(rawGID, 10, 64)
 	if err != nil {
-		return "", nil, fmt.Errorf("gsheets: invalid gid %q in URL: %w", rawGID, err)
+		return nil, fmt.Errorf("gsheets: invalid gid %q in URL: %w", rawGID, err)
 	}
-	return spreadsheetID, &v, nil
+	return &v, nil
 }

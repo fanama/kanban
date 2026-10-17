@@ -24,10 +24,10 @@ var (
 	// details (a missing column, a duplicate card ID…) name what is wrong.
 	ErrInvalidImport = errors.New("invalid board file")
 
-	ErrBoardNotFound    = errors.New("board not found")
-	ErrEmptyBoardName   = errors.New("board name must not be empty")
-	ErrBoardExists      = errors.New("a board with this name already exists")
-	ErrLastBoard        = errors.New("there must always be at least one board")
+	ErrBoardNotFound     = errors.New("board not found")
+	ErrEmptyBoardName    = errors.New("board name must not be empty")
+	ErrBoardExists       = errors.New("a board with this name already exists")
+	ErrLastBoard         = errors.New("there must always be at least one board")
 	ErrBoardsUnsupported = errors.New("this storage keeps a single board")
 
 	ErrColumnNotFound  = errors.New("column not found")

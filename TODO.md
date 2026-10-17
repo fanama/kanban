@@ -24,11 +24,27 @@ open items point at the next useful changes.
       one `boards` table with `board_id` scoping; Google Sheets stays a single
       board and refuses board operations (`ErrBoardsUnsupported`).
 - [x] Export/import a board as JSON (validated against the live board rules).
+- [x] Responsive Trello-inspired UI: OS light/dark tokens, snap-scrolling
+      columns, off-canvas sidebar, per-column card composer, native desktop
+      drag and drop between legal adjacent lists, and a read-only card dialog
+      that keeps inline editing. Styles live in a served static stylesheet.
 - [x] Legacy migration: an old `kanban.db` without boards/columns is upgraded
       in place (content becomes the board *My board*).
 - [x] Tests: use-case tests plus real-HTTP harness tests, a repository
       contract shared by memory and SQLite, and a fake-Sheets server so the
       gsheets adapter needs no Google credentials. `go vet ./...` clean.
+- [x] Clean architecture split: four small input ports (boards, cards,
+      columns, import/export) with shared reader/ID/cascade collaborators,
+      manual constructor injection, storage and HTTP adapters split by
+      responsibility, and an automated `internal/architecture` test enforcing
+      the 400-line file / 40-line function caps.
+- [x] Removed stale files: the abandoned `clean-code-architecture-spec.md`
+      (describing another project) and the unused `opencode.json` tooling
+      config.
+- [x] SQLite keeps a column ID **per board** (`PRIMARY KEY (board_id, id)`),
+      matching the in-memory adapter: a second board can start with its own
+      `To Do / In Progress / Done`, and the repository contract pins it. Files
+      written by the previous release are rebuilt in place on open.
 
 ## Next steps / ideas
 
@@ -49,3 +65,8 @@ open items point at the next useful changes.
       contract is impossible while it holds a single board — either document
       that limit clearly (README does) or work out a single-board contract
       variant.
+- [ ] **Known limitation:** SQLite still keys card IDs globally, so importing
+      a board's export into a *different* board fails with `card already
+      exists` (HTTP 500). Give `cards` a `(board_id, id)` key, carry
+      `board_id` into `card_dependencies` for the cascades, and migrate
+      existing files; the in-memory adapter already behaves correctly.

@@ -1,0 +1,81 @@
+{{define "board"}}
+<main id="board" class="board-shell">
+  <aside class="sidebar" id="sidebar" aria-label="Boards and columns">
+    <section class="sidebar-section">
+      <h2 class="side-title">Boards</h2>
+      <nav class="boards">
+        {{range .Boards}}
+        <a class="board-tab{{if eq .ID $.BoardID}} active{{end}}" href="/?board={{.ID}}" title="Open this board">
+          <span class="board-dot" aria-hidden="true"></span>
+          <span class="board-tab-name">{{.Name}}</span>
+        </a>
+        {{end}}
+      </nav>
+      <form action="/boards" method="post" hx-post="/boards" hx-target="#board" hx-swap="outerHTML" class="inline-form">
+        <input type="text" name="name" placeholder="New board…" aria-label="New board name" required autocomplete="off">
+        <button type="submit" class="button icon" title="Create a board" aria-label="Create a board">+</button>
+      </form>
+      {{if gt (len .Boards) 1}}
+      <form action="/boards/{{.Board.ID}}/delete" method="post" hx-post="/boards/{{.Board.ID}}/delete"
+            hx-target="#board" hx-swap="outerHTML" class="inline-form"
+            hx-confirm="Delete the board “{{.Board.Name}}”? Its cards go with it.">
+        <button type="submit" class="button danger block" title="Delete this board">Delete this board</button>
+      </form>
+      {{end}}
+    </section>
+
+    {{if .BoardID}}
+    <hr>
+    <section class="sidebar-section">
+      <h2 class="side-title">Lists</h2>
+      <form class="inline-form" action="/columns" method="post" hx-post="/columns" hx-target="#board" hx-swap="outerHTML">
+        <input type="text" name="name" placeholder="New list…" aria-label="New list name" required autocomplete="off">
+        <button type="submit" class="button icon" title="Add a list at the end of the board" aria-label="Add a list">+</button>
+      </form>
+      <p class="sidebar-hint">Lists are the stages a card moves through. Cards advance left to right.</p>
+    </section>
+    {{end}}
+  </aside>
+
+  <div class="scrim" data-sidebar-close aria-hidden="true"></div>
+
+  <section class="board-canvas" aria-label="Board">
+    <div class="board-heading">
+      <div>
+        <p class="eyebrow">Board</p>
+        <h1>{{if .Board.Name}}{{.Board.Name}}{{else}}Kanban{{end}}</h1>
+      </div>
+      <p class="board-summary">{{.CardCount}} card{{if ne .CardCount 1}}s{{end}} · {{len .Columns}} list{{if ne (len .Columns) 1}}s{{end}}</p>
+    </div>
+
+    <div class="columns">
+      {{range .Columns}}
+      <section class="column" data-column-id="{{.Column.ID}}" aria-label="{{.Column.Name}}">
+        {{template "column-head" .}}
+        <div class="cards">
+          {{range .Cards}}{{template "card" .}}{{else}}<p class="empty">No cards yet</p>{{end}}
+        </div>
+        <details class="composer">
+          <summary class="composer-toggle">+ Add a card</summary>
+          <form class="composer-form" action="/cards" method="post" hx-post="/cards" hx-target="#board" hx-swap="outerHTML">
+            <input type="hidden" name="column_id" value="{{.Column.ID}}">
+            <input type="text" name="title" placeholder="Card title…" aria-label="Card title" required autocomplete="off">
+            <div class="composer-row">
+              <select name="priority" aria-label="Priority">
+                <option value="Low">Low</option>
+                <option value="Medium" selected>Medium</option>
+                <option value="High">High</option>
+              </select>
+              <button type="submit" class="button primary">Add card</button>
+            </div>
+          </form>
+        </details>
+      </section>
+      {{else}}
+      <p class="empty board-empty">This board has no list yet: add one from the sidebar.</p>
+      {{end}}
+      {{if not .Boards}}<p class="empty board-empty">No board yet.</p>{{end}}
+    </div>
+  </section>
+</main>
+{{end}}

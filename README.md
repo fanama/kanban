@@ -6,21 +6,43 @@ server, and the storage backend is a swappable adapter. The app holds
 **several boards**, each with its own columns and cards.
 
 ```
-cmd/server            Composition root (dependency injection)
+cmd/server            Composition root (manual constructor injection)
 internal/domain       Entities + invariants (Board, Card, Column, Priority, BoardView)
-internal/ports        input.go (BoardUseCase) / output.go (BoardRepository)
-internal/usecase      Application services: board CRUD, GetBoard, MoveCard, AddCard…
+internal/ports        input.go (BoardService, CardService, ColumnService,
+                      ImportExportService) / output.go (BoardRepository)
+internal/usecase      Four services (boards, cards, columns, import/export) over
+                      shared collaborators: a board reader, an ID generator and
+                      the move/demote/pull cascade
+internal/architecture Structural guardrails: the 400-line / 40-function test
 internal/adapters
   primary/http        HTMX handler + templates   (driving adapter)
   secondary/sqlite    SQLite repository          (driven adapter, default)
   secondary/memory    In-memory repository       (driven adapter, tests/demo)
   secondary/gsheets   Google Sheets repository   (driven adapter, optional, one board)
-harness               Tests driving the use case, the HTTP adapter and the
+harness               Tests driving the services, the HTTP adapter and the
                       repository contract shared by every storage adapter
 ```
 
 Dependency rule: `domain` imports nothing, `usecase` imports `domain` + `ports`,
-adapters import the core. Nothing in the core imports an adapter.
+adapters import the core. Nothing in the core imports an adapter. The services
+receive their repository through the constructor, never build one, and the
+composition root (`cmd/server`) is the only place that knows a concrete
+storage; it passes the four services to the HTTP handler.
+
+## Structure and guardrails
+
+Every Go file stays at **400 lines or fewer** and every function at **40 lines
+or fewer**. `go test ./internal/architecture` parses the tree and fails on a
+violation; the served stylesheet
+(`internal/adapters/primary/http/static/style.css`) is the single documented
+exception, since a stylesheet has no function-level unit. Test files follow the
+same caps.
+
+Use case code is split by responsibility: `board_service.go`, `card_service.go`,
+`column_service.go` and `transfer_service.go`, with the shared reader, the ID
+generator and the cascade in their own files. The HTTP adapter mirrors that
+split (one file per surface plus `view.go` for the render models), and the
+storage adapters are split by table (boards, cards, columns, schema, snapshot).
 
 ## Run it
 
@@ -36,6 +58,7 @@ Environment:
 | `KANBAN_DB` | `kanban.db` | SQLite file (created on first run) |
 | `PORT` | `8080` | Listen port |
 | `TEMPLATE_GLOB` | `internal/adapters/primary/http/templates/*.html` | Template location (run from the module root) |
+| `STATIC_DIR` | `internal/adapters/primary/http/static` | Stylesheet directory served under `/static/` |
 | `SHEET_URL` | *empty* | Spreadsheet link; selecting it switches to `sheets` (ID and `gid` are parsed out) |
 | `SHEET_ID` | *empty* | Bare spreadsheet ID (alternative to `SHEET_URL`) |
 | `SHEET_NAME` | *first tab* | Pin a tab by title |
@@ -125,13 +148,14 @@ file: a service account must be given edit rights (share the sheet with its
 ## Test the core without a network
 
 ```bash
-go test ./... -count=1        # harness + adapter tests
+go test ./... -count=1        # harness + adapter tests + size guardrails
 go vet ./...
+gofmt -l .                    # must print nothing
 ```
 
 `harness/board_test.go` exercises the input port directly (no HTTP) and the
 primary adapter end-to-end (real HTTP requests against `httptest`), including
-the HTMX fragment contract. `harness/repository_contract_test.go` runs the same
+the HTMX fragment contract, the per-column composer and the static stylesheet. `harness/repository_contract_test.go` runs the same
 expectations against **every** `BoardRepository` adapter (memory and SQLite), so
 the output port behaves identically whichever storage is wired in.
 `internal/adapters/secondary/gsheets` is tested against a fake Sheets API
@@ -149,9 +173,39 @@ column does not lose its cards: they fall back to *the previous column* (or to
 the one that becomes first when the deleted column was the first), so a card
 never moves forward by accident.
 
-The sidebar is where the board is built: a **Columns** section holds the
-`+` form (always visible, whatever the width of the columns area), and every
-column header carries a ✎ pencil (inline rename form) and a ✕ button.
+The sidebar is where the board is built: a **Lists** section holds the
+`+` form (always visible, whatever the width of the lists area), and every
+list header carries a ✎ pencil (inline rename form) and a ✕ button. Each list
+also has its own **+ Add a card** composer at the bottom, so a card can be
+created directly where it belongs; `POST /cards` without a `column_id` still
+targets the first list.
+
+## Look and interaction
+
+The board is a responsive, Trello-inspired layout: lists are fixed-width
+columns that scroll sideways with scroll snapping on a phone, and each list
+scrolls its own cards. The sidebar is persistent on desktop and becomes an
+off-canvas drawer (with a backdrop) below 900 px. Without JavaScript the
+sidebar simply stays visible above the board.
+
+The palette follows the operating system (`prefers-color-scheme`): a light
+board canvas with white cards, and a dark variant, both using the same indigo
+brand tokens. The stylesheet lives in
+`internal/adapters/primary/http/static/style.css` and is served at
+`/static/style.css` (`STATIC_DIR` overrides the directory). There is no CSS
+build step and no external font or icon dependency.
+
+Desktop cards can be dragged between **adjacent** lists: backwards is always
+allowed, forwards only when the stage rule permits the advance (the same
+condition that enables the move button). A blocked list never accepts a drop;
+the server still enforces every rule. Touch devices use the move buttons.
+
+Clicking a card title opens its read-only detail in a native `<dialog>`. The
+**Edit** button inside it swaps in the existing inline edit form; a successful
+save, move or delete re-renders the board and closes the dialog. `Esc`, the
+backdrop and the ✕ button close it. Drag and drop, the dialog and the mobile
+drawer are progressive enhancements: the classic forms keep working without
+JavaScript.
 
 ## The card
 
@@ -209,7 +263,7 @@ explicitly removes every constraint. The edit form always submits the field
 | `GET` | `/` | Full board page (the selected board — `?board=` switches) |
 | `POST` | `/boards` | Create a board (`name`); the browser is switched to it |
 | `POST` | `/boards/{id}/delete` | Delete a board and everything on it (the last board stays) |
-| `POST` | `/cards` | Add a card (`title`, `priority`) |
+| `POST` | `/cards` | Add a card (`title`, `priority`, optional `column_id`; defaults to the first list) |
 | `POST` | `/cards/move` | Move a card one stage (`card_id`, `column_id`) |
 | `GET` | `/cards/{id}` | Read-only card fragment (leaves edit mode) |
 | `GET` | `/cards/{id}/edit` | Card edit form fragment |

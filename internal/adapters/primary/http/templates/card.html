@@ -1,0 +1,96 @@
+{{define "card"}}
+<article class="card prio-{{.Priority}}"
+         data-card-id="{{.ID}}"
+         {{if .Prev}}data-prev-column="{{.Prev.ID}}"{{end}}
+         {{if .Next}}data-next-column="{{.Next.ID}}"{{end}}
+         {{if and .Next (not .Blockers) (not .Teamed)}}data-can-advance="true"{{end}}
+         draggable="true">
+  <h3 class="card-title">
+    <button type="button" class="card-title-button" data-card-open="{{.ID}}">{{.Title}}</button>
+  </h3>
+  {{if .Description}}<p class="desc">{{.Description}}</p>{{end}}
+  {{if .Objective}}<p class="field"><span>Objective</span>{{.Objective}}</p>{{end}}
+  {{if .Blockers}}<p class="blocked">Blocked by {{range $i, $b := .Blockers}}{{if $i}}, {{end}}{{$b.Title}}{{end}}</p>{{end}}
+  {{if .Teamed}}<p class="blocked">{{range $i, $t := .Teamed}}{{if $i}}, {{end}}{{$t.Title}}{{end}} still wait{{if eq (len .Teamed) 1}}s{{end}} for this card</p>{{end}}
+  <div class="card-foot">
+    <span class="badge prio-{{.Priority}}">{{.Priority}}</span>
+    <div class="moves">
+      {{if .Prev}}
+      <form action="/cards/move" method="post" hx-post="/cards/move" hx-target="#board" hx-swap="outerHTML">
+        <input type="hidden" name="card_id" value="{{.ID}}">
+        <input type="hidden" name="column_id" value="{{.Prev.ID}}">
+        <button type="submit" class="button subtle" title="Back to {{.Prev.Name}}">◀ {{.Prev.Name}}</button>
+      </form>
+      {{end}}
+      {{if .Next}}
+        {{if .Blockers}}
+        <button class="button subtle locked" type="button" disabled title="Finish the constraints first">🔒 {{.Next.Name}}</button>
+        {{else if .Teamed}}
+        <button class="button subtle locked" type="button" disabled title="The cards that depend on this one must move first">🔒 {{.Next.Name}}</button>
+        {{else}}
+        <form action="/cards/move" method="post" hx-post="/cards/move" hx-target="#board" hx-swap="outerHTML">
+          <input type="hidden" name="card_id" value="{{.ID}}">
+          <input type="hidden" name="column_id" value="{{.Next.ID}}">
+          <button type="submit" class="button subtle" title="Advance to {{.Next.Name}}">{{.Next.Name}} ▶</button>
+        </form>
+        {{end}}
+      {{end}}
+      <button class="button subtle edit" type="button" hx-get="/cards/{{.ID}}/edit" hx-target="closest article" hx-swap="outerHTML">Edit</button>
+      <form action="/cards/{{.ID}}/delete" method="post" hx-post="/cards/{{.ID}}/delete" hx-target="#board" hx-swap="outerHTML"
+            hx-confirm="Delete the card “{{.Title}}”? Cards depending on it lose this constraint.">
+        <button type="submit" class="button subtle danger" title="Delete this card">Delete</button>
+      </form>
+    </div>
+  </div>
+</article>
+{{end}}
+
+{{define "card-form"}}
+<article class="card card-form prio-{{.Priority}}">
+  <form action="/cards/{{.ID}}" method="post" hx-post="/cards/{{.ID}}" hx-target="#board" hx-swap="outerHTML">
+    <label class="field-label">Title
+      <input type="text" name="title" value="{{.Title}}" required>
+    </label>
+    <label class="field-label">Description
+      <textarea name="description" rows="2" placeholder="What is this card about?">{{.Description}}</textarea>
+    </label>
+    <label class="field-label">Objective
+      <textarea name="objective" rows="2" placeholder="What does done look like?">{{.Objective}}</textarea>
+    </label>
+    <fieldset class="deps">
+      <legend>Constraints — cards to finish first</legend>
+      <input type="hidden" name="depends_on" value="">
+      {{range .Candidates}}
+      <label class="dep">
+        <input type="checkbox" name="depends_on" value="{{.ID}}"{{if $.Selected .ID}} checked{{end}}>
+        <span class="dep-title">{{.Title}}</span>
+        <span class="badge">{{$.ColumnName .ColumnID}}</span>
+      </label>
+      {{else}}
+      <p class="empty">No other card to depend on yet</p>
+      {{end}}
+    </fieldset>
+    <div class="row">
+      <label class="field-label">List
+        <select name="column_id">
+          {{$selected := .ColumnID}}
+          {{range .Columns}}
+          <option value="{{.ID}}"{{if eq .ID $selected}} selected{{end}}>{{.Name}}</option>
+          {{end}}
+        </select>
+      </label>
+      <label class="field-label">Priority
+        <select name="priority">
+          <option value="Low"{{if eq .Priority "Low"}} selected{{end}}>Low</option>
+          <option value="Medium"{{if eq .Priority "Medium"}} selected{{end}}>Medium</option>
+          <option value="High"{{if eq .Priority "High"}} selected{{end}}>High</option>
+        </select>
+      </label>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="button primary">Save</button>
+      <button type="button" class="button" hx-get="/cards/{{.ID}}" hx-target="closest article" hx-swap="outerHTML">Cancel</button>
+    </div>
+  </form>
+</article>
+{{end}}

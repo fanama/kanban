@@ -36,13 +36,38 @@ func TestRepositoryContract(t *testing.T) {
 	}
 }
 
+// contractState carries the boards, columns and card the phases build on.
+type contractState struct {
+	repo   ports.BoardRepository
+	ctx    context.Context
+	boardA domain.Board
+	boardB domain.Board
+	wanted []domain.Column
+	card   domain.Card
+}
+
 func contract(t *testing.T, repo ports.BoardRepository) {
 	t.Helper()
-	ctx := context.Background()
+	state := &contractState{repo: repo, ctx: context.Background()}
+	contractBoards(t, state)
+	contractColumns(t, state)
+	contractRenamesColumns(t, state)
+	contractCards(t, state)
+	contractCardReads(t, state)
+	contractCardUpdates(t, state)
+	contractCardMoves(t, state)
+	contractDeletesCard(t, state)
+	contractDeletesColumn(t, state)
+	contractReplacesBoard(t, state)
+	contractReplacedBoardIsClean(t, state)
+	contractDeletesBoards(t, state)
+	contractDeletesEveryBoard(t, state)
+}
 
-	// --- boards -------------------------------------------------------------
+func contractBoards(t *testing.T, s *contractState) {
+	t.Helper()
 
-	boards, err := repo.ListBoards(ctx)
+	boards, err := s.repo.ListBoards(s.ctx)
 	if err != nil {
 		t.Fatalf("ListBoards failed: %v", err)
 	}
@@ -50,21 +75,23 @@ func contract(t *testing.T, repo ports.BoardRepository) {
 		t.Fatalf("Expected no board yet, got %v", boards)
 	}
 
-	boardA := domain.Board{ID: "bda", Name: "Board A"}
-	if _, err := repo.CreateBoard(ctx, boardA); err != nil {
+	s.boardA = domain.Board{ID: "bda", Name: "Board A"}
+	if _, err := s.repo.CreateBoard(s.ctx, s.boardA); err != nil {
 		t.Fatalf("CreateBoard failed: %v", err)
 	}
-	boardB := domain.Board{ID: "bdb", Name: "Board B"}
-	if _, err := repo.CreateBoard(ctx, boardB); err != nil {
+	s.boardB = domain.Board{ID: "bdb", Name: "Board B"}
+	if _, err := s.repo.CreateBoard(s.ctx, s.boardB); err != nil {
 		t.Fatalf("CreateBoard failed: %v", err)
 	}
-	if _, err := repo.CreateBoard(ctx, domain.Board{ID: "bda", Name: "Other"}); !errors.Is(err, domain.ErrBoardExists) {
+	if _, err := s.repo.CreateBoard(s.ctx, domain.Board{ID: "bda", Name: "Other"}); !errors.Is(err, domain.ErrBoardExists) {
 		t.Errorf("Expected ErrBoardExists on a duplicate board, got %v", err)
 	}
+}
 
-	// --- columns ------------------------------------------------------------
+func contractColumns(t *testing.T, s *contractState) {
+	t.Helper()
 
-	columns, err := repo.GetColumns(ctx, boardA.ID)
+	columns, err := s.repo.GetColumns(s.ctx, s.boardA.ID)
 	if err != nil {
 		t.Fatalf("GetColumns failed: %v", err)
 	}
@@ -72,13 +99,13 @@ func contract(t *testing.T, repo ports.BoardRepository) {
 		t.Fatalf("Expected an empty board, got %v", columns)
 	}
 
-	wanted := []domain.Column{
+	s.wanted = []domain.Column{
 		{ID: "col_a", Name: "To Do", Position: 0},
 		{ID: "col_b", Name: "Doing", Position: 1},
 		{ID: "col_c", Name: "Done", Position: 2},
 	}
-	for _, column := range wanted {
-		created, err := repo.CreateColumn(ctx, boardA.ID, column)
+	for _, column := range s.wanted {
+		created, err := s.repo.CreateColumn(s.ctx, s.boardA.ID, column)
 		if err != nil {
 			t.Fatalf("CreateColumn(%s) failed: %v", column.ID, err)
 		}
@@ -87,51 +114,87 @@ func contract(t *testing.T, repo ports.BoardRepository) {
 		}
 	}
 
-	columns, err = repo.GetColumns(ctx, boardA.ID)
+	columns, err = s.repo.GetColumns(s.ctx, s.boardA.ID)
 	if err != nil {
 		t.Fatalf("GetColumns failed: %v", err)
 	}
-	if !reflect.DeepEqual(columns, wanted) {
-		t.Errorf("GetColumns returned %+v, want %+v", columns, wanted)
+	if !reflect.DeepEqual(columns, s.wanted) {
+		t.Errorf("GetColumns returned %+v, want %+v", columns, s.wanted)
 	}
 
-	if _, err := repo.CreateColumn(ctx, boardA.ID, wanted[1]); !errors.Is(err, domain.ErrColumnExists) {
+	if _, err := s.repo.CreateColumn(s.ctx, s.boardA.ID, s.wanted[1]); !errors.Is(err, domain.ErrColumnExists) {
 		t.Errorf("Expected ErrColumnExists on a duplicate column, got %v", err)
 	}
 
-	if err := repo.DeleteColumn(ctx, boardB.ID, "col_a"); !errors.Is(err, domain.ErrColumnNotFound) {
+	contractColumnsAreScoped(t, s)
+}
+
+// contractColumnsAreScoped checks that a column ID belongs to its board: two
+// boards can both start with the same stages, and neither sees the other's.
+func contractColumnsAreScoped(t *testing.T, s *contractState) {
+	t.Helper()
+
+	for _, column := range s.wanted {
+		if _, err := s.repo.CreateColumn(s.ctx, s.boardB.ID, column); err != nil {
+			t.Fatalf("CreateColumn(%s) on a second board failed: %v", column.ID, err)
+		}
+	}
+	for _, board := range []domain.Board{s.boardA, s.boardB} {
+		columns, err := s.repo.GetColumns(s.ctx, board.ID)
+		if err != nil {
+			t.Fatalf("GetColumns(%s) failed: %v", board.ID, err)
+		}
+		if !reflect.DeepEqual(columns, s.wanted) {
+			t.Errorf("GetColumns(%s) returned %+v, want %+v", board.ID, columns, s.wanted)
+		}
+	}
+
+	// Leave board B empty again for the phases that rely on that.
+	for _, column := range s.wanted {
+		if err := s.repo.DeleteColumn(s.ctx, s.boardB.ID, column.ID); err != nil {
+			t.Fatalf("DeleteColumn(%s) on the second board failed: %v", column.ID, err)
+		}
+	}
+}
+
+func contractRenamesColumns(t *testing.T, s *contractState) {
+	t.Helper()
+
+	if err := s.repo.DeleteColumn(s.ctx, s.boardB.ID, "col_a"); !errors.Is(err, domain.ErrColumnNotFound) {
 		t.Errorf("Expected another board's column to be invisible, got %v", err)
 	}
 
 	// RenameColumn replaces a name in place: the column keeps its ID, its
 	// position and its order.
-	if err := repo.RenameColumn(ctx, boardB.ID, "col_a", "X"); !errors.Is(err, domain.ErrColumnNotFound) {
+	if err := s.repo.RenameColumn(s.ctx, s.boardB.ID, "col_a", "X"); !errors.Is(err, domain.ErrColumnNotFound) {
 		t.Errorf("Expected another board's column to be invisible to RenameColumn, got %v", err)
 	}
-	if err := repo.RenameColumn(ctx, boardA.ID, "missing", "X"); !errors.Is(err, domain.ErrColumnNotFound) {
+	if err := s.repo.RenameColumn(s.ctx, s.boardA.ID, "missing", "X"); !errors.Is(err, domain.ErrColumnNotFound) {
 		t.Errorf("Expected ErrColumnNotFound on a rename of a missing column, got %v", err)
 	}
-	if err := repo.RenameColumn(ctx, boardA.ID, "col_b", "Work in progress"); err != nil {
+	if err := s.repo.RenameColumn(s.ctx, s.boardA.ID, "col_b", "Work in progress"); err != nil {
 		t.Errorf("RenameColumn failed: %v", err)
 	}
-	wanted[1].Name = "Work in progress"
-	columns, err = repo.GetColumns(ctx, boardA.ID)
+	s.wanted[1].Name = "Work in progress"
+	columns, err := s.repo.GetColumns(s.ctx, s.boardA.ID)
 	if err != nil {
 		t.Fatalf("GetColumns after RenameColumn failed: %v", err)
 	}
-	if !reflect.DeepEqual(columns, wanted) {
-		t.Errorf("RenameColumn changed more than the name: got %+v, want %+v", columns, wanted)
+	if !reflect.DeepEqual(columns, s.wanted) {
+		t.Errorf("RenameColumn changed more than the name: got %+v, want %+v", columns, s.wanted)
 	}
+}
 
-	// --- cards --------------------------------------------------------------
+func contractCards(t *testing.T, s *contractState) {
+	t.Helper()
 
 	// A constraint target, so the dependency list has something to point at.
 	dependency := domain.Card{ID: "contract_0", Title: "Foundation", ColumnID: "col_a", Priority: domain.PriorityHigh}
-	if _, err := repo.Create(ctx, boardA.ID, dependency); err != nil {
+	if _, err := s.repo.Create(s.ctx, s.boardA.ID, dependency); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 
-	card := domain.Card{
+	s.card = domain.Card{
 		ID:          "contract_1",
 		Title:       "Contract",
 		Description: "What it is",
@@ -140,41 +203,48 @@ func contract(t *testing.T, repo ports.BoardRepository) {
 		ColumnID:    "col_b",
 		Priority:    domain.PriorityMedium,
 	}
-	if _, err := repo.Create(ctx, boardA.ID, card); err != nil {
+	if _, err := s.repo.Create(s.ctx, s.boardA.ID, s.card); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 
-	cards, err := repo.GetAll(ctx, boardA.ID)
+	cards, err := s.repo.GetAll(s.ctx, s.boardA.ID)
 	if err != nil {
 		t.Fatalf("GetAll failed: %v", err)
 	}
-	if !containsCard(cards, card) {
+	if !containsCard(cards, s.card) {
 		t.Fatalf("Expected the created card from GetAll, got %v", cards)
 	}
 
-	got, err := repo.GetByID(ctx, boardA.ID, card.ID)
+	got, err := s.repo.GetByID(s.ctx, s.boardA.ID, s.card.ID)
 	if err != nil {
 		t.Fatalf("GetByID failed: %v", err)
 	}
-	if !reflect.DeepEqual(got, card) {
-		t.Errorf("GetByID did not return the created card: got %+v, want %+v", got, card)
+	if !reflect.DeepEqual(got, s.card) {
+		t.Errorf("GetByID did not return the created card: got %+v, want %+v", got, s.card)
 	}
+}
 
-	if _, err := repo.Create(ctx, boardA.ID, card); !errors.Is(err, domain.ErrCardExists) {
+func contractCardReads(t *testing.T, s *contractState) {
+	t.Helper()
+
+	if _, err := s.repo.Create(s.ctx, s.boardA.ID, s.card); !errors.Is(err, domain.ErrCardExists) {
 		t.Errorf("Expected ErrCardExists on a duplicate ID, got %v", err)
 	}
-
-	if _, err := repo.GetByID(ctx, boardA.ID, "missing"); !errors.Is(err, domain.ErrCardNotFound) {
+	if _, err := s.repo.GetByID(s.ctx, s.boardA.ID, "missing"); !errors.Is(err, domain.ErrCardNotFound) {
 		t.Errorf("Expected ErrCardNotFound, got %v", err)
 	}
-	if _, err := repo.GetByID(ctx, boardB.ID, card.ID); !errors.Is(err, domain.ErrCardNotFound) {
+	if _, err := s.repo.GetByID(s.ctx, s.boardB.ID, s.card.ID); !errors.Is(err, domain.ErrCardNotFound) {
 		t.Errorf("Expected another board's card to be invisible, got %v", err)
 	}
+}
+
+func contractCardUpdates(t *testing.T, s *contractState) {
+	t.Helper()
 
 	// A full edit must persist every field, not just the column. An empty
 	// (non-nil) constraint list explicitly clears the constraints.
 	edited := domain.Card{
-		ID:          card.ID,
+		ID:          s.card.ID,
 		Title:       "Contract, edited",
 		Description: "New description",
 		Objective:   "New objective",
@@ -182,10 +252,10 @@ func contract(t *testing.T, repo ports.BoardRepository) {
 		ColumnID:    "col_c",
 		Priority:    domain.PriorityHigh,
 	}
-	if err := repo.Update(ctx, boardA.ID, edited); err != nil {
+	if err := s.repo.Update(s.ctx, s.boardA.ID, edited); err != nil {
 		t.Fatalf("Update failed: %v", err)
 	}
-	got, err = repo.GetByID(ctx, boardA.ID, card.ID)
+	got, err := s.repo.GetByID(s.ctx, s.boardA.ID, s.card.ID)
 	if err != nil {
 		t.Fatalf("GetByID after Update failed: %v", err)
 	}
@@ -194,12 +264,16 @@ func contract(t *testing.T, repo ports.BoardRepository) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Update did not persist the whole card: got %+v, want %+v", got, want)
 	}
+}
+
+func contractCardMoves(t *testing.T, s *contractState) {
+	t.Helper()
 
 	// A single-cell move must leave the rest of the card alone.
-	if err := repo.UpdateColumn(ctx, boardA.ID, card.ID, "col_b"); err != nil {
+	if err := s.repo.UpdateColumn(s.ctx, s.boardA.ID, s.card.ID, "col_b"); err != nil {
 		t.Fatalf("UpdateColumn failed: %v", err)
 	}
-	got, err = repo.GetByID(ctx, boardA.ID, card.ID)
+	got, err := s.repo.GetByID(s.ctx, s.boardA.ID, s.card.ID)
 	if err != nil {
 		t.Fatalf("GetByID after UpdateColumn failed: %v", err)
 	}
@@ -207,155 +281,10 @@ func contract(t *testing.T, repo ports.BoardRepository) {
 		t.Errorf("UpdateColumn changed more than the column: %+v", got)
 	}
 
-	if err := repo.UpdateColumn(ctx, boardA.ID, "missing", "col_a"); !errors.Is(err, domain.ErrCardNotFound) {
+	if err := s.repo.UpdateColumn(s.ctx, s.boardA.ID, "missing", "col_a"); !errors.Is(err, domain.ErrCardNotFound) {
 		t.Errorf("Expected ErrCardNotFound when moving an unknown card, got %v", err)
 	}
-
-	if err := repo.Update(ctx, boardA.ID, domain.Card{ID: "missing", Title: "Ghost", ColumnID: "col_a", Priority: domain.PriorityLow}); !errors.Is(err, domain.ErrCardNotFound) {
+	if err := s.repo.Update(s.ctx, s.boardA.ID, domain.Card{ID: "missing", Title: "Ghost", ColumnID: "col_a", Priority: domain.PriorityLow}); !errors.Is(err, domain.ErrCardNotFound) {
 		t.Errorf("Expected ErrCardNotFound when updating an unknown card, got %v", err)
 	}
-
-	// --- deleting a card ----------------------------------------------------
-
-	// contract_1 depends on contract_0: deleting the constraint drops it from
-	// the dependent's list instead of leaving a ghost.
-	if err := repo.DeleteCard(ctx, boardA.ID, "contract_0"); err != nil {
-		t.Fatalf("DeleteCard failed: %v", err)
-	}
-	if _, err := repo.GetByID(ctx, boardA.ID, "contract_0"); !errors.Is(err, domain.ErrCardNotFound) {
-		t.Errorf("Expected the deleted card to be gone, got %v", err)
-	}
-	got, err = repo.GetByID(ctx, boardA.ID, card.ID)
-	if err != nil {
-		t.Fatalf("GetByID after DeleteCard failed: %v", err)
-	}
-	if len(got.DependsOn) != 0 {
-		t.Errorf("Expected the constraint to be dropped from the dependent, got %v", got.DependsOn)
-	}
-	if err := repo.DeleteCard(ctx, boardA.ID, "missing"); !errors.Is(err, domain.ErrCardNotFound) {
-		t.Errorf("Expected ErrCardNotFound when deleting twice, got %v", err)
-	}
-
-	// --- deleting a column --------------------------------------------------
-
-	// Deleting renumbers the survivors, so the next column created lands after
-	// them and the ordering stays dense.
-	if err := repo.DeleteColumn(ctx, boardA.ID, "col_b"); err != nil {
-		t.Fatalf("DeleteColumn failed: %v", err)
-	}
-	columns, err = repo.GetColumns(ctx, boardA.ID)
-	if err != nil {
-		t.Fatalf("GetColumns after DeleteColumn failed: %v", err)
-	}
-	if !reflect.DeepEqual(columns, []domain.Column{wanted[0], {ID: "col_c", Name: "Done", Position: 1}}) {
-		t.Errorf("Expected the survivors renumbered, got %+v", columns)
-	}
-
-	// The cards of a deleted column are the use case's business: storage must
-	// not touch them.
-	got, err = repo.GetByID(ctx, boardA.ID, card.ID)
-	if err != nil {
-		t.Fatalf("GetByID after DeleteColumn failed: %v", err)
-	}
-	if got.ColumnID != "col_b" || got.Title != "Contract, edited" {
-		t.Errorf("DeleteColumn must not touch the cards, got %+v", got)
-	}
-
-	if err := repo.DeleteColumn(ctx, boardA.ID, "missing"); !errors.Is(err, domain.ErrColumnNotFound) {
-		t.Errorf("Expected ErrColumnNotFound, got %v", err)
-	}
-
-	// --- replacing the whole board (board file import) -----------------------
-
-	importedColumns := []domain.Column{
-		{ID: "col_backlog", Name: "Backlog", Position: 0},
-		{ID: "col_wip", Name: "WIP", Position: 1},
-	}
-	importedCards := []domain.Card{
-		{ID: "imp_0", Title: "Seed", ColumnID: "col_backlog", Priority: domain.PriorityLow},
-		{ID: "imp_1", Title: "Imported", Description: "From a file", ColumnID: "col_wip",
-			DependsOn: []string{"imp_0"}, Priority: domain.PriorityHigh},
-	}
-	if err := repo.ReplaceBoard(ctx, boardA.ID, importedColumns, importedCards); err != nil {
-		t.Fatalf("ReplaceBoard failed: %v", err)
-	}
-
-	columns, err = repo.GetColumns(ctx, boardA.ID)
-	if err != nil {
-		t.Fatalf("GetColumns after ReplaceBoard failed: %v", err)
-	}
-	if !reflect.DeepEqual(columns, importedColumns) {
-		t.Errorf("Expected the imported columns, got %+v", columns)
-	}
-	for _, want := range importedCards {
-		got, err := repo.GetByID(ctx, boardA.ID, want.ID)
-		if err != nil {
-			t.Fatalf("GetByID(%s) failed: %v", want.ID, err)
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("GetByID(%s) returned %+v, want %+v", want.ID, got, want)
-		}
-	}
-
-	// Everything the board used to hold is gone.
-	if _, err := repo.GetByID(ctx, boardA.ID, card.ID); !errors.Is(err, domain.ErrCardNotFound) {
-		t.Errorf("Expected the old cards to be gone, got %v", err)
-	}
-	if err := repo.DeleteColumn(ctx, boardA.ID, "col_a"); !errors.Is(err, domain.ErrColumnNotFound) {
-		t.Errorf("Expected the old columns to be gone, got %v", err)
-	}
-
-	// --- board replacement is scoped, and DeleteBoard takes everything ------
-
-	// Board B still holds whatever it had — here, nothing: the import of A
-	// must not have reached it.
-	bCards, err := repo.GetAll(ctx, boardB.ID)
-	if err != nil {
-		t.Fatalf("GetAll on board B failed: %v", err)
-	}
-	if len(bCards) != 0 {
-		t.Errorf("Expected the import to stay inside board A, got %v", bCards)
-	}
-
-	if err := repo.DeleteBoard(ctx, boardB.ID); err != nil {
-		t.Fatalf("DeleteBoard failed: %v", err)
-	}
-	if _, err := repo.GetColumns(ctx, boardB.ID); !errors.Is(err, domain.ErrBoardNotFound) {
-		t.Errorf("Expected the deleted board to be gone, got %v", err)
-	}
-	boards, err = repo.ListBoards(ctx)
-	if err != nil {
-		t.Fatalf("ListBoards failed: %v", err)
-	}
-	if len(boards) != 1 || boards[0].ID != boardA.ID {
-		t.Errorf("Expected only board A to remain, got %+v", boards)
-	}
-
-	// Board A keeps working after its sibling is gone.
-	if err := repo.DeleteBoard(ctx, boardA.ID); err != nil {
-		t.Fatalf("DeleteBoard failed: %v", err)
-	}
-	if _, err := repo.GetAll(ctx, boardA.ID); !errors.Is(err, domain.ErrBoardNotFound) {
-		t.Errorf("Expected deleting a board to take its cards, got %v", err)
-	}
-	boards, err = repo.ListBoards(ctx)
-	if err != nil {
-		t.Fatalf("ListBoards failed: %v", err)
-	}
-	if len(boards) != 0 {
-		t.Errorf("Expected an empty list of boards, got %+v", boards)
-	}
-
-	if err := repo.DeleteBoard(ctx, "missing"); !errors.Is(err, domain.ErrBoardNotFound) {
-		t.Errorf("Expected ErrBoardNotFound, got %v", err)
-	}
-}
-
-func containsCard(cards []domain.Card, want domain.Card) bool {
-	for _, c := range cards {
-		if reflect.DeepEqual(c, want) {
-			return true
-		}
-	}
-	return false
 }
