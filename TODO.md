@@ -31,8 +31,9 @@ open items point at the next useful changes.
 - [x] Legacy migration: an old `kanban.db` without boards/columns is upgraded
       in place (content becomes the board *My board*).
 - [x] Tests: use-case tests plus real-HTTP harness tests, a repository
-      contract shared by memory and SQLite, and a fake-Sheets server so the
-      gsheets adapter needs no Google credentials. `go vet ./...` clean.
+      contract shared by memory and SQLite, a real WebSocket/patch harness, and
+      a fake-Sheets server so the gsheets adapter needs no Google credentials.
+      `go vet ./...` clean.
 - [x] Clean architecture split: four small input ports (boards, cards,
       columns, import/export) with shared reader/ID/cascade collaborators,
       manual constructor injection, storage and HTTP adapters split by
@@ -45,6 +46,23 @@ open items point at the next useful changes.
       matching the in-memory adapter: a second board can start with its own
       `To Do / In Progress / Done`, and the repository contract pins it. Files
       written by the previous release are rebuilt in place on open.
+- [x] **Live sync:** use cases publish through the `internal/events` observer
+      bus; a same-origin WebSocket fans server-rendered card/column/sidebar
+      patches out per board. Reconnects back off and resync the board; slow
+      clients are dropped; own echoes are suppressed on both sides.
+- [x] **Front-first actions:** add, move, edit, delete, column and board
+      actions update the DOM before the request, reconcile with the JSON patch,
+      and roll back to the previous DOM with the server error on refusal.
+- [x] **Card Markdown:** description and objective render a basic dialect with
+      vendored `marked` + `DOMPurify`; images, scripts, styles, forms, event
+      handlers and `javascript:` URLs are stripped. Titles and board/list names
+      stay plain text.
+- [x] **Card versioning:** `version` starts at 1, advances on edit/move in
+      SQLite, memory and Sheets, and a stale edit returns `409` with a
+      reload/overwrite conflict dialog.
+- [x] **Render and transport cost:** `boardFacts` removes repeated full-board
+      scans per card, a 200-card benchmark guards the path, and gzip,
+      `Server-Timing` and slow-request logs make deployed latency visible.
 
 ## Next steps / ideas
 
@@ -59,8 +77,13 @@ open items point at the next useful changes.
       cards.
 - [ ] Keyboard-friendly flow: HTMX focus handling after a swap so the add-card
       form is ready for typing without a click.
-- [ ] Deployment notes in the README (how to run behind a reverse proxy,
-      a Dockerfile for the cgo/sqlite binary).
+- [ ] Add a Dockerfile for the cgo/SQLite binary (the proxy and WebSocket
+      deployment requirements are now documented in the README).
+- [ ] Replace the in-process event bus with a shared broker (Redis pub/sub,
+      NATS or Postgres `LISTEN/NOTIFY`) before running more than one app
+      instance; the `events.Publisher` seam is already in place.
+- [ ] Vendor HTMX under `static/vendor/` too, so the browser layer does not
+      depend on unpkg being reachable in production.
 - [ ] Onboarding the Google Sheets adapter into the shared repository
       contract is impossible while it holds a single board — either document
       that limit clearly (README does) or work out a single-board contract

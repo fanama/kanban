@@ -189,7 +189,7 @@ func contractCards(t *testing.T, s *contractState) {
 	t.Helper()
 
 	// A constraint target, so the dependency list has something to point at.
-	dependency := domain.Card{ID: "contract_0", Title: "Foundation", ColumnID: "col_a", Priority: domain.PriorityHigh}
+	dependency := domain.Card{ID: "contract_0", Title: "Foundation", ColumnID: "col_a", Priority: domain.PriorityHigh, Version: 1}
 	if _, err := s.repo.Create(s.ctx, s.boardA.ID, dependency); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -202,6 +202,7 @@ func contractCards(t *testing.T, s *contractState) {
 		DependsOn:   []string{"contract_0"},
 		ColumnID:    "col_b",
 		Priority:    domain.PriorityMedium,
+		Version:     1,
 	}
 	if _, err := s.repo.Create(s.ctx, s.boardA.ID, s.card); err != nil {
 		t.Fatalf("Create failed: %v", err)
@@ -251,6 +252,7 @@ func contractCardUpdates(t *testing.T, s *contractState) {
 		DependsOn:   []string{},
 		ColumnID:    "col_c",
 		Priority:    domain.PriorityHigh,
+		Version:     1,
 	}
 	if err := s.repo.Update(s.ctx, s.boardA.ID, edited); err != nil {
 		t.Fatalf("Update failed: %v", err)
@@ -261,8 +263,17 @@ func contractCardUpdates(t *testing.T, s *contractState) {
 	}
 	want := edited
 	want.DependsOn = nil // clearing is stored as "no constraints"
+	want.Version = 2     // storage advances the version it was given
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Update did not persist the whole card: got %+v, want %+v", got, want)
+	}
+
+	// A caller holding the previous version must be refused, not silently
+	// overwrite the committed edit.
+	stale := edited
+	stale.Version = 1
+	if err := s.repo.Update(s.ctx, s.boardA.ID, stale); !errors.Is(err, domain.ErrCardConflict) {
+		t.Errorf("Expected ErrCardConflict for a stale version, got %v", err)
 	}
 }
 

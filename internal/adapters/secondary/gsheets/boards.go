@@ -3,6 +3,7 @@ package gsheets
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"kanban-app/internal/domain"
@@ -46,7 +47,18 @@ func cardFromRow(row []any, index int) domain.Card {
 		DependsOn:   parseIDs(cell(row, 6)),
 		ColumnID:    cell(row, 2),
 		Priority:    domain.Priority(cell(row, 3)).Normalize(),
+		Version:     cardVersion(row),
 	}
+}
+
+// cardVersion reads the optional H column. Sheets written before versioning
+// existed have no cell there and read as version 1.
+func cardVersion(row []any) int {
+	version, err := strconv.Atoi(cell(row, 7))
+	if err != nil || version < 1 {
+		return 1
+	}
+	return version
 }
 
 func cardID(row []any, index int) string {

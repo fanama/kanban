@@ -74,21 +74,24 @@ func toView(board domain.BoardView, boards []domain.Board, boardID string) board
 	}
 
 	canDelete := len(board.Columns) > 1
+	facts := newBoardFacts(board)
 	for index := range board.Columns {
-		view.Columns = append(view.Columns, decorateColumn(board, index, canDelete))
+		view.Columns = append(view.Columns, decorateColumn(facts, index, canDelete))
 	}
 	return view
 }
 
-func decorateColumn(board domain.BoardView, index int, canDelete bool) columnView {
+func decorateColumn(facts *boardFacts, index int, canDelete bool) columnView {
+	board := facts.board
 	view := columnView{Column: board.Columns[index].Column, CanDelete: canDelete}
 	for _, card := range board.Columns[index].Cards {
-		view.Cards = append(view.Cards, decorateCard(board, index, card))
+		view.Cards = append(view.Cards, decorateCard(facts, index, card))
 	}
 	return view
 }
 
-func decorateCard(board domain.BoardView, index int, card domain.Card) cardView {
+func decorateCard(facts *boardFacts, index int, card domain.Card) cardView {
+	board := facts.board
 	view := cardView{Card: card}
 
 	if index > 0 {
@@ -98,12 +101,12 @@ func decorateCard(board domain.BoardView, index int, card domain.Card) cardView 
 	if index+1 < len(board.Columns) {
 		next := board.Columns[index+1].Column
 		view.Next = &next
-		view.Blockers = domain.Unfinished(card, next.Position, board)
+		view.Blockers = facts.unfinished(card, next.Position)
 		// The dependents are normally pulled along; only a pull impossible by
-		// the stage rules leaves someone waiting, so plan the pull to know
-		// whether the button must be locked.
-		if _, err := domain.PullPlan(card, next.Position, board); err != nil {
-			view.Teamed = domain.AheadOfDependents(card, next.Position, board)
+		// the stage rules leaves someone waiting. Most cards have no
+		// dependents, so the expensive plan is skipped for them.
+		if facts.hasDependents(card) && !facts.canPull(card, next.Position) {
+			view.Teamed = facts.aheadOfDependents(card, next.Position)
 		}
 	}
 	return view
@@ -111,10 +114,11 @@ func decorateCard(board domain.BoardView, index int, card domain.Card) cardView 
 
 // cardViewOf renders a single card with the same decoration as the board.
 func cardViewOf(card domain.Card, board domain.BoardView) cardView {
+	facts := newBoardFacts(board)
 	for index, column := range board.Columns {
 		for _, candidate := range column.Cards {
 			if candidate.ID == card.ID {
-				return decorateCard(board, index, card)
+				return decorateCard(facts, index, card)
 			}
 		}
 	}
@@ -137,6 +141,8 @@ func statusFor(err error) int {
 	switch {
 	case errors.Is(err, domain.ErrCardNotFound), errors.Is(err, domain.ErrColumnNotFound), errors.Is(err, domain.ErrBoardNotFound):
 		return http.StatusNotFound
+	case errors.Is(err, domain.ErrCardConflict):
+		return http.StatusConflict
 	case errors.Is(err, domain.ErrEmptyTitle),
 		errors.Is(err, domain.ErrCardBlocked),
 		errors.Is(err, domain.ErrWouldLeaveDependents),

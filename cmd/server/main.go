@@ -10,6 +10,7 @@ import (
 	"os"
 
 	primaryHTTP "kanban-app/internal/adapters/primary/http"
+	"kanban-app/internal/events"
 	"kanban-app/internal/usecase"
 )
 
@@ -38,12 +39,14 @@ func run() error {
 		defer closer.Close()
 	}
 
-	services := usecase.NewServices(repo)
+	bus := events.NewBus()
+	services := usecase.NewServices(repo, bus)
 
 	handler, err := primaryHTTP.NewHTTPHandler(
 		services.Board, services.Cards, services.Columns, services.Transfer,
 		envOr("TEMPLATE_GLOB", defaultTemplateGlob),
 		envOr("STATIC_DIR", defaultStaticDir),
+		bus,
 	)
 	if err != nil {
 		return fmt.Errorf("template load failed: %w", err)
@@ -54,7 +57,8 @@ func run() error {
 
 	addr := ":" + envOr("PORT", "8080")
 	fmt.Printf("Clean Architecture Kanban server running on %s...\n", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	root := primaryHTTP.WithTiming(primaryHTTP.WithGzip(mux))
+	if err := http.ListenAndServe(addr, root); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil

@@ -24,7 +24,7 @@ func TestSQLiteRepoCardCRUD(t *testing.T) {
 
 	alpha := domain.Card{
 		ID: "card_a", Title: "Alpha", Description: "What it is", Objective: "What done looks like",
-		ColumnID: "To Do", Priority: domain.PriorityHigh,
+		ColumnID: "To Do", Priority: domain.PriorityHigh, Version: 1,
 	}
 	if _, err := repo.Create(ctx, testBoard, alpha); err != nil {
 		t.Fatalf("Create failed: %v", err)
@@ -153,6 +153,7 @@ func testSQLiteRejectsUnknownOnUpdate(t *testing.T, ctx context.Context, repo *R
 		t.Fatalf("Update failed: %v", err)
 	}
 
+	card, _ = repo.GetByID(ctx, testBoard, "card_b")
 	card.DependsOn = []string{"ghost"}
 	if err := repo.Update(ctx, testBoard, card); !errors.Is(err, domain.ErrUnknownDependency) {
 		t.Errorf("Expected ErrUnknownDependency on Update, got %v", err)
@@ -187,6 +188,7 @@ func testSQLiteDependenciesAreReplaced(t *testing.T, ctx context.Context, repo *
 		t.Errorf("Expected both constraints, got %v", got.DependsOn)
 	}
 
+	card, _ = repo.GetByID(ctx, testBoard, "card_a")
 	card.DependsOn = []string{"card_c"}
 	if err := repo.Update(ctx, testBoard, card); err != nil {
 		t.Fatalf("Update failed: %v", err)
@@ -258,7 +260,7 @@ func TestSQLiteRepoUpdateSavesEveryField(t *testing.T) {
 	repo := newBoardRepo(t, filepath.Join(t.TempDir(), "kanban.db"))
 	createColumns(t, repo, domain.DefaultColumns()...)
 
-	original := domain.Card{ID: "card_1", Title: "Title", ColumnID: "To Do", Priority: domain.PriorityLow}
+	original := domain.Card{ID: "card_1", Title: "Title", ColumnID: "To Do", Priority: domain.PriorityLow, Version: 1}
 	if _, err := repo.Create(ctx, testBoard, original); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -270,6 +272,7 @@ func TestSQLiteRepoUpdateSavesEveryField(t *testing.T) {
 		Objective:   "Objective",
 		ColumnID:    "Done",
 		Priority:    domain.PriorityHigh,
+		Version:     1, // the version the edit started from
 	}
 	if err := repo.Update(ctx, testBoard, edited); err != nil {
 		t.Fatalf("Update failed: %v", err)
@@ -279,6 +282,7 @@ func TestSQLiteRepoUpdateSavesEveryField(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID failed: %v", err)
 	}
+	edited.Version = 2 // storage advances it atomically
 	if !reflect.DeepEqual(got, edited) {
 		t.Errorf("Update did not persist the whole card: got %+v, want %+v", got, edited)
 	}

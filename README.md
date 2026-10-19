@@ -13,9 +13,12 @@ internal/ports        input.go (BoardService, CardService, ColumnService,
 internal/usecase      Four services (boards, cards, columns, import/export) over
                       shared collaborators: a board reader, an ID generator and
                       the move/demote/pull cascade
+internal/events       In-process observer bus, event kinds and request identity
 internal/architecture Structural guardrails: the 400-line / 40-function test
 internal/adapters
-  primary/http        HTMX handler + templates   (driving adapter)
+  primary/http        HTMX handler, templates, WebSocket hub, patch renderer,
+                      gzip/timing middleware and static browser modules
+                      (driving adapter)
   secondary/sqlite    SQLite repository          (driven adapter, default)
   secondary/memory    In-memory repository       (driven adapter, tests/demo)
   secondary/gsheets   Google Sheets repository   (driven adapter, optional, one board)
@@ -23,11 +26,12 @@ harness               Tests driving the services, the HTTP adapter and the
                       repository contract shared by every storage adapter
 ```
 
-Dependency rule: `domain` imports nothing, `usecase` imports `domain` + `ports`,
-adapters import the core. Nothing in the core imports an adapter. The services
-receive their repository through the constructor, never build one, and the
-composition root (`cmd/server`) is the only place that knows a concrete
-storage; it passes the four services to the HTTP handler.
+Dependency rule: `domain` imports nothing, `usecase` imports `domain`, `ports`
+and the small `events` publisher interface, adapters import the core. Nothing in
+the core imports an adapter. The services receive their repository and event
+publisher through the constructor, never build one, and the composition root
+(`cmd/server`) is the only place that knows a concrete storage; it passes the
+four services and one event bus to the HTTP handler.
 
 ## Structure and guardrails
 
@@ -43,6 +47,14 @@ Use case code is split by responsibility: `board_service.go`, `card_service.go`,
 generator and the cascade in their own files. The HTTP adapter mirrors that
 split (one file per surface plus `view.go` for the render models), and the
 storage adapters are split by table (boards, cards, columns, schema, snapshot).
+
+The browser layer has no build step. Plain ES modules live in
+`internal/adapters/primary/http/static/`: `app.js` boots the page, `identity.js`
+owns the display name and tab ID, `actions.js` applies optimistic changes,
+`patches.js` reconciles live fragments, `ws.js` owns reconnect/resync,
+`markdown.js` runs the sanitizer, and `ui.js` renders toasts and dialogs.
+`marked` and `DOMPurify` are vendored under `static/vendor/`; HTMX is still
+loaded from unpkg.
 
 ## Run it
 
@@ -70,21 +82,27 @@ Environment:
 `sqlite` writes to `KANBAN_DB` (default `kanban.db`):
 
 ```sql
+boards(id TEXT PRIMARY KEY, name TEXT NOT NULL)
+
 cards(id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
       objective TEXT NOT NULL, status TEXT NOT NULL, priority TEXT NOT NULL,
-      created_at TIMESTAMP NOT NULL)
+      version INTEGER NOT NULL DEFAULT 1, created_at TIMESTAMP NOT NULL,
+      board_id TEXT NOT NULL)
 
 card_dependencies(card_id TEXT REFERENCES cards(id) ON DELETE CASCADE,
                   depends_on_id TEXT REFERENCES cards(id) ON DELETE CASCADE,
                   position INTEGER NOT NULL,
                   PRIMARY KEY (card_id, depends_on_id))
 
-columns(id TEXT PRIMARY KEY, name TEXT NOT NULL, position INTEGER NOT NULL)
+columns(id TEXT NOT NULL, name TEXT NOT NULL, position INTEGER NOT NULL,
+        board_id TEXT NOT NULL, PRIMARY KEY (board_id, id))
 ```
 
 The `status` column of `cards` holds the ID of the card's column; the name is
 historical (the default column IDs are the status names an earlier version
-used), so an existing file needs no data rewrite.
+used), so an existing file needs no data rewrite. `version` starts at `1` and
+advances on every edit and move; `Update` checks the version the caller started
+from and returns `ErrCardConflict` instead of overwriting a newer edit.
 
 Constraints live in their own table, so a card can never depend on a card that
 does not exist. The old free-text `constraints` column of earlier versions is no
@@ -125,12 +143,13 @@ is needed: the adapter asks the API for the spreadsheet's tabs and uses the one
 matching the URL's `gid` (or the first tab).
 
 The adapter writes the `ID | Title | Status | Priority | Description |
-Objective | BlockedBy` header on first use (range `A1:G1`), reads cards from
-`A2:G`, and moving a card writes its column cell only. The `Status` column holds
-the card's column ID — the name is the one a spreadsheet written by an earlier
-version already has. `BlockedBy` holds the constraint card IDs separated by
-commas (semicolons and extra spaces are read too). Rows whose ID column is empty
-fall back to `row_<n>`, and an unknown priority degrades to `Low`.
+Objective | BlockedBy | Version` header on first use (range `A1:H1`), reads
+cards from `A2:H`, and moving a card writes its column cell and the next
+version. The `Status` column holds the card's column ID — the name is the one a
+spreadsheet written by an earlier version already has. `BlockedBy` holds the
+constraint card IDs separated by commas (semicolons and extra spaces are read
+too). Rows whose ID column is empty fall back to `row_<n>`, an unknown priority
+degrades to `Low`, and a missing `Version` cell reads as `1`.
 
 The board's columns live in their own `Columns` tab (`ID | Name | Position`),
 created on first use; deleting a column blanks its row and renumbers the rest,
@@ -151,14 +170,17 @@ file: a service account must be given edit rights (share the sheet with its
 go test ./... -count=1        # harness + adapter tests + size guardrails
 go vet ./...
 gofmt -l .                    # must print nothing
+go test -bench . ./internal/adapters/primary/http
 ```
 
 `harness/board_test.go` exercises the input port directly (no HTTP) and the
 primary adapter end-to-end (real HTTP requests against `httptest`), including
-the HTMX fragment contract, the per-column composer and the static stylesheet. `harness/repository_contract_test.go` runs the same
-expectations against **every** `BoardRepository` adapter (memory and SQLite), so
-the output port behaves identically whichever storage is wired in.
-`internal/adapters/secondary/gsheets` is tested against a fake Sheets API
+the HTMX fragment contract, the per-column composer and the static stylesheet.
+`harness/realtime_test.go` covers patch responses, `409` conflicts and a real
+WebSocket client receiving a broadcast. `harness/repository_contract_test.go`
+runs the same expectations against **every** `BoardRepository` adapter (memory
+and SQLite), so the output port behaves identically whichever storage is wired
+in. `internal/adapters/secondary/gsheets` is tested against a fake Sheets API
 server, so it needs no Google credentials.
 
 ## The board
@@ -207,13 +229,66 @@ backdrop and the ✕ button close it. Drag and drop, the dialog and the mobile
 drawer are progressive enhancements: the classic forms keep working without
 JavaScript.
 
+## Live board and optimistic actions
+
+With JavaScript enabled, every add / move / edit / delete / column / board
+action is applied to the DOM immediately, before the request finishes. The
+request runs in the background with `X-Kanban-Patch: true`; the server answers
+with a small JSON patch, and the optimistic node is replaced by the
+authoritative fragment. If the server refuses the action, the previous DOM is
+restored and the server message stays in `#flash`.
+
+A WebSocket at `/ws?board=<id>&client=<tab-id>` carries the same patches to
+every other viewer of that board. The application services publish an event
+through `internal/events` after the repository commits; the HTTP adapter turns
+the event into card/column fragments, counts and a board summary, and the
+browser applies only those pieces, highlights them and shows a toast naming
+the actor. The originating tab ignores its own echo. Board create/delete events
+update every sidebar; card/column events never cross boards.
+
+If the socket closes, the topbar shows **Reconnecting…** and reconnects with
+exponential backoff; after five failures it falls back to polling every five
+seconds. A reconnect (or a tab returning after more than 30 seconds hidden)
+fetches the current board fragment and replaces `#board`, so missed events are
+not left stale. A dirty edit form blocks the replacement: live updates pause
+until the form closes.
+
+A first visit asks for a display name, stored in `localStorage` and sent as
+`X-Kanban-Actor` (with the per-tab `X-Kanban-Client`). This is a courtesy label
+in toasts, **not authentication** — anyone can pick any name.
+
+Card versions make concurrent edits explicit. The edit form submits the version
+it started from; a stale save returns `409` and the browser offers **Reload**
+(the fresh version) or **Overwrite** (copy the fresh version and deliberately
+resubmit the local text). A live patch during an open edit does not overwrite
+the form; it shows the same warning.
+
+### Markdown in cards
+
+`Description` and `Objective` are rendered as Markdown in the card and in the
+read-only dialog; titles, column names and board names stay plain text. The
+dialect is intentionally basic: paragraphs, line breaks, emphasis, `h1`–`h3`,
+inline code, fenced code, blockquotes, lists and links. Tables, task lists,
+strikethrough, footnotes, autolinks and images are not supported. Raw HTML is
+sanitized by DOMPurify with an allowlist: scripts, styles, iframes, images,
+forms, event handlers and `javascript:` URLs are removed. Rendering happens in
+the browser after initial load, after HTMX swaps, after live patches and for
+optimistic cards. Without JavaScript the raw Markdown is still readable as
+text.
+
+The **no-JS** path is intact: classic posts return the whole page, HTMX
+requests still receive the `#board` fragment, and the sidebar stays visible.
+Drag, the dialog, live updates and formatted Markdown are the enhancements that
+need JavaScript.
+
 ## The card
 
 `Card` carries the work item: `Title` (the only required field), `Description`,
-`Objective`, `DependsOn`, `ColumnID` and `Priority`. `Description` and
-`Objective` are free text (multi-line); an empty value means "not filled in
-yet". `UpdateCard` overlays the edited fields on the stored card and refuses an
-empty title or an unknown column.
+`Objective`, `DependsOn`, `ColumnID`, `Priority` and `Version`. `Description`
+and `Objective` are Markdown source (multi-line); an empty value means "not
+filled in yet". `UpdateCard` overlays the edited fields on the stored card and
+refuses an empty title, an unknown column, or an edit whose `Version` is not
+the stored one (`ErrCardConflict`).
 
 Deleting a card (`DeleteCard`, the ✕ button) removes it and *drops the
 constraint* from the cards that pointed at it: a dependent keeps its other
@@ -267,7 +342,7 @@ explicitly removes every constraint. The edit form always submits the field
 | `POST` | `/cards/move` | Move a card one stage (`card_id`, `column_id`) |
 | `GET` | `/cards/{id}` | Read-only card fragment (leaves edit mode) |
 | `GET` | `/cards/{id}/edit` | Card edit form fragment |
-| `POST` | `/cards/{id}` | Save an edit (`title`, `description`, `objective`, `depends_on` (repeated), `column_id`, `priority`) |
+| `POST` | `/cards/{id}` | Save an edit (`title`, `description`, `objective`, `depends_on` (repeated), `column_id`, `priority`, `version`) |
 | `POST` | `/cards/{id}/delete` | Delete a card (its dependents lose only this constraint) |
 | `POST` | `/columns` | Append a column (`name`) |
 | `GET` | `/columns/{id}` | Column header fragment (cancels rename mode) |
@@ -276,18 +351,39 @@ explicitly removes every constraint. The edit form always submits the field
 | `POST` | `/columns/{id}/delete` | Delete a column (its cards fall back one stage) |
 | `GET` | `/export.json` | Download the selected board as a JSON file (`kanban-<name>.json`) |
 | `POST` | `/import.json` | Replace the selected board with a JSON file (`file` upload or `application/json` body) |
+| `GET` | `/ws?board=<id>&client=<tab-id>` | Same-origin WebSocket carrying board and sidebar patches |
 
 Requests carrying `HX-Request: true` receive only the `<main id="board">`
 fragment, which HTMX swaps in place. Plain form posts return the whole page, so
 the board also works with JavaScript disabled — including the edit form, whose
 `POST /cards/{id}` also works as a classic form submission.
 
-Errors: `404` for an unknown card, column or board, `400` for an empty title,
-a blocked move, an empty or duplicate column name, deleting the last column,
-an unknown constraint or a constraint cycle, an invalid board file, an empty
-or duplicated board name, deleting the last board, or a board operation a
-single-board storage cannot do; `500` otherwise. The page shows the message in
-the `#flash` element and keeps the current board.
+JavaScript mutations send `X-Kanban-Patch: true` (plus `X-Kanban-Actor` and
+`X-Kanban-Client`) and receive a JSON patch envelope instead of HTML:
+
+```json
+{
+  "type": "patch", "board_id": "bd_1", "seq": 42, "event": "card.moved",
+  "actor": "Alice", "client_id": "tab-a",
+  "fragments": [{"target": "card", "id": "card_1", "html": "<article></article>"}],
+  "remove": [], "reload": false,
+  "notice": {"kind": "card.moved", "actor": "Alice", "card_title": "Design it",
+             "to": "Doing"}
+}
+```
+
+Fragments target `card`, `column-head`, `column-cards`, `columns`,
+`board-summary` or `sidebar-boards`; `reload: true` makes the browser fetch the
+full `#board` fragment. Board create/delete in patch mode answer with
+`{"type":"redirect","url":"/?board=…"}` so the optimistic sidebar can finish
+with a normal navigation.
+
+Errors: `404` for an unknown card, column or board, `409` for a stale card
+version, `400` for an empty title, a blocked move, an empty or duplicate column
+name, deleting the last column, an unknown constraint or a constraint cycle, an
+invalid board file, an empty or duplicated board name, deleting the last board,
+or a board operation a single-board storage cannot do; `500` otherwise. The
+page shows the message in the `#flash` element and keeps the current board.
 
 ## Boards
 
@@ -325,8 +421,9 @@ SQLite or Sheets rows, but with real types. An example file:
     {"id": "Done", "name": "Done", "position": 2}
   ],
   "cards": [
-    {"id": "card_1", "title": "Design it", "description": "", "objective": "",
-     "depends_on": [], "column_id": "To Do", "priority": "High"}
+    {"id": "card_1", "title": "Design it", "description": "**Draft** it",
+     "objective": "", "depends_on": [], "column_id": "To Do",
+     "priority": "High", "version": 1}
   ]
 }
 ```
@@ -337,4 +434,31 @@ alike — is replaced in one operation. The file is checked with the same rules
 the live board obeys: a title is mandatory, a constraint must exist and can
 neither be the card itself nor form a cycle, card IDs must be unique and non
 empty; a card whose column is not in the file falls back to the first one and
-card positions are renumbered densely.
+card positions are renumbered densely. A card's `depends_on` may be an array
+of card IDs or a single string of IDs separated by commas, semicolons or
+newlines (the same form the Sheets `BlockedBy` cell uses). Imported cards keep
+a positive `version` (a missing or zero version becomes `1`).
+
+## Deployment notes
+
+Live updates use an **in-process** bus. That is enough for the intended
+single long-running process (1–5 viewers per board), but it does **not** work
+behind a load balancer with several app instances: an event published by
+instance A is invisible to clients connected to instance B. Keep one instance,
+or replace the bus with a shared broker (Redis pub/sub, NATS, Postgres
+`LISTEN/NOTIFY`) before scaling horizontally.
+
+The reverse proxy must forward the `Upgrade` and `Connection` headers for
+`/ws`, must not buffer or gzip that stream, and should keep idle connections
+open longer than the 30-second heartbeat (60+ seconds recommended). The app
+sends `Server-Timing: app;dur=…` on normal responses and logs requests slower
+than 250 ms with status and response size; HTML, CSS, JS and JSON responses are
+gzipped when the client accepts it.
+
+`STATIC_DIR` must exist in the deployed image, including `static/vendor/`
+(`marked` and `DOMPurify` are served locally; HTMX still comes from unpkg). The
+static directory is copied with the binary — the app does not use `go:embed`.
+`KANBAN_DB` must point at a persistent volume for SQLite; a request-scoped or
+serverless runtime would lose the database and cannot hold WebSocket
+connections. If the app sleeps after inactivity, expect one reconnect and a
+full board resync after wake; the topbar status makes that visible.

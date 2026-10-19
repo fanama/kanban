@@ -72,14 +72,20 @@ func TestSheetsRepoMoveWritesOneCell(t *testing.T) {
 	if err := repo.UpdateColumn(context.Background(), "tab", "card_b", "Done"); err != nil {
 		t.Fatalf("UpdateColumn failed: %v", err)
 	}
-	if len(fake.updates) != 1 {
-		t.Fatalf("Expected one write, got %d", len(fake.updates))
+	if len(fake.updates) != 2 {
+		t.Fatalf("Expected the column and version cells, got %d writes", len(fake.updates))
 	}
 	if fake.updates[0].Range != "Sheet1!C3" {
 		t.Errorf("Expected the column cell of row 3, got %q", fake.updates[0].Range)
 	}
 	if got := fake.updates[0].Values[0][0]; got != "Done" {
 		t.Errorf("Expected the new column to be written, got %v", got)
+	}
+	if fake.updates[1].Range != "Sheet1!H3" {
+		t.Errorf("Expected the version cell of row 3, got %q", fake.updates[1].Range)
+	}
+	if got := fake.updates[1].Values[0][0]; got != "2" {
+		t.Errorf("Expected the version to advance, got %v", got)
 	}
 
 	if err := repo.UpdateColumn(context.Background(), "tab", "missing", "Done"); !errors.Is(err, domain.ErrCardNotFound) {
@@ -100,7 +106,7 @@ func TestSheetsRepoResolvesFirstTabWhenUnset(t *testing.T) {
 	if _, err := repo.GetAll(context.Background(), "tab"); err != nil {
 		t.Fatalf("GetAll failed: %v", err)
 	}
-	if fake.lastRange != "'Feuille 1'!A2:G" {
+	if fake.lastRange != "'Feuille 1'!A2:H" {
 		t.Errorf("Expected a quoted range for the resolved tab, got %q", fake.lastRange)
 	}
 }
@@ -142,6 +148,7 @@ func TestSheetsRepoUpdatesAllCells(t *testing.T) {
 		DependsOn:   []string{"card_b", "card_c"},
 		ColumnID:    "Doing",
 		Priority:    domain.PriorityHigh,
+		Version:     1, // the version the edit started from
 	}
 	if err := repo.Update(context.Background(), "tab", edited); err != nil {
 		t.Fatalf("Update failed: %v", err)
@@ -150,10 +157,10 @@ func TestSheetsRepoUpdatesAllCells(t *testing.T) {
 	if len(fake.updates) != 1 {
 		t.Fatalf("Expected one write, got %d: %+v", len(fake.updates), fake.updates)
 	}
-	if fake.updates[0].Range != "Sheet1!B2:G2" {
+	if fake.updates[0].Range != "Sheet1!B2:H2" {
 		t.Errorf("Expected the row's editable cells, got %q", fake.updates[0].Range)
 	}
-	want := []any{"Alpha v2", "Doing", "High", "Description", "Objective", "card_b, card_c"}
+	want := []any{"Alpha v2", "Doing", "High", "Description", "Objective", "card_b, card_c", "2"}
 	if got := fake.updates[0].Values[0]; len(got) != len(want) {
 		t.Fatalf("Expected %d cells, got %v", len(want), got)
 	}
@@ -165,5 +172,15 @@ func TestSheetsRepoUpdatesAllCells(t *testing.T) {
 
 	if err := repo.Update(context.Background(), "tab", domain.Card{ID: "missing", Title: "Ghost", ColumnID: "To Do", Priority: domain.PriorityLow}); !errors.Is(err, domain.ErrCardNotFound) {
 		t.Errorf("Expected ErrCardNotFound, got %v", err)
+	}
+}
+
+func TestSheetsRepoRejectsStaleVersion(t *testing.T) {
+	rows := [][]any{{"card_a", "Alpha", "To Do", "Low", "", "", "", "2"}}
+	_, repo := newFakeRepo(t, Config{SheetName: "Sheet1"}, rows)
+
+	stale := domain.Card{ID: "card_a", Title: "Alpha", ColumnID: "To Do", Priority: domain.PriorityLow, Version: 1}
+	if err := repo.Update(context.Background(), "tab", stale); !errors.Is(err, domain.ErrCardConflict) {
+		t.Errorf("Expected ErrCardConflict for a stale version, got %v", err)
 	}
 }

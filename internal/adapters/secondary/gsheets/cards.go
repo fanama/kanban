@@ -56,9 +56,17 @@ func (r *Repo) Update(ctx context.Context, boardID string, card domain.Card) err
 	if err != nil {
 		return err
 	}
+	current, err := r.GetByID(ctx, boardID, card.ID)
+	if err != nil {
+		return err
+	}
+	if card.Version > 0 && current.Version != card.Version {
+		return domain.ErrCardConflict
+	}
+	card.Version = current.Version + 1
 
-	cellRange := fmt.Sprintf("%s!B%d:G%d", r.sheet, row, row)
-	values := rowOf(card)[1:] // B..G: everything except the ID
+	cellRange := fmt.Sprintf("%s!B%d:H%d", r.sheet, row, row)
+	values := rowOf(card)[1:] // B..H: everything except the ID
 	if _, err := r.svc.Spreadsheets.Values.
 		Update(r.spreadsheet, cellRange, &sheets.ValueRange{Values: [][]any{values}}).
 		ValueInputOption("RAW").
@@ -86,9 +94,13 @@ func (r *Repo) rowIndex(ctx context.Context, id string) (int, error) {
 // rowOf flattens a card. The constraints go in one cell as a comma-separated
 // list of card IDs, which is what a spreadsheet can hold.
 func rowOf(card domain.Card) []any {
+	if card.Version <= 0 {
+		card.Version = 1
+	}
 	return []any{
 		card.ID, card.Title, card.ColumnID, string(card.Priority),
 		card.Description, card.Objective, strings.Join(card.DependsOn, ", "),
+		fmt.Sprintf("%d", card.Version),
 	}
 }
 
@@ -114,15 +126,31 @@ func (r *Repo) UpdateColumn(ctx context.Context, boardID, cardID, columnID strin
 	if err != nil {
 		return err
 	}
+	card, err := r.GetByID(ctx, boardID, cardID)
+	if err != nil {
+		return err
+	}
 
-	cellRange := fmt.Sprintf("%s!C%d", r.sheet, row)
-	if _, err := r.svc.Spreadsheets.Values.
-		Update(r.spreadsheet, cellRange, &sheets.ValueRange{Values: [][]any{{columnID}}}).
-		ValueInputOption("RAW").
-		Do(); err != nil {
+	if err := r.writeCell(ctx, row, "C", columnID); err != nil {
+		return fmt.Errorf("gsheets: move card %s: %w", cardID, err)
+	}
+	version := card.Version + 1
+	if version < 1 {
+		version = 1
+	}
+	if err := r.writeCell(ctx, row, "H", fmt.Sprintf("%d", version)); err != nil {
 		return fmt.Errorf("gsheets: move card %s: %w", cardID, err)
 	}
 	return nil
+}
+
+func (r *Repo) writeCell(ctx context.Context, row int, column, value string) error {
+	cellRange := fmt.Sprintf("%s!%s%d", r.sheet, column, row)
+	_, err := r.svc.Spreadsheets.Values.
+		Update(r.spreadsheet, cellRange, &sheets.ValueRange{Values: [][]any{{value}}}).
+		ValueInputOption("RAW").
+		Do()
+	return err
 }
 
 // DeleteCard blanks the card's row, in place: the order of the remaining rows
@@ -136,7 +164,7 @@ func (r *Repo) DeleteCard(ctx context.Context, boardID, cardID string) error {
 	for i := range blank {
 		blank[i] = ""
 	}
-	cellRange := fmt.Sprintf("%s!A%d:G%d", r.sheet, row, row)
+	cellRange := fmt.Sprintf("%s!A%d:H%d", r.sheet, row, row)
 	if _, err := r.svc.Spreadsheets.Values.
 		Update(r.spreadsheet, cellRange, &sheets.ValueRange{Values: [][]any{blank}}).
 		ValueInputOption("RAW").

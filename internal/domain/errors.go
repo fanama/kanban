@@ -7,6 +7,10 @@ var (
 	ErrEmptyTitle   = errors.New("card title must not be empty")
 	ErrCardExists   = errors.New("card already exists")
 
+	// ErrCardConflict is returned when an edit carries a version that is no
+	// longer current: someone else changed or moved the card first.
+	ErrCardConflict = errors.New("card changed since you opened it")
+
 	// ErrCardBlocked is returned when a card cannot move forward because a
 	// constraint is not far enough along the board.
 	ErrCardBlocked = errors.New("card is blocked by a constraint")

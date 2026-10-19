@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS cards (
 	objective   TEXT NOT NULL DEFAULT '',
 	status      TEXT NOT NULL,
 	priority    TEXT NOT NULL,
+	version     INTEGER NOT NULL DEFAULT 1,
 	created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	board_id    TEXT NOT NULL DEFAULT 'default'
 );
@@ -59,6 +60,7 @@ const defaultBoardName = "My board"
 var addedColumns = []struct{ name, ddl string }{
 	{"description", `ALTER TABLE cards ADD COLUMN description TEXT NOT NULL DEFAULT ''`},
 	{"objective", `ALTER TABLE cards ADD COLUMN objective TEXT NOT NULL DEFAULT ''`},
+	{"version", `ALTER TABLE cards ADD COLUMN version INTEGER NOT NULL DEFAULT 1`},
 }
 
 // migrate brings an existing database up to the current schema.

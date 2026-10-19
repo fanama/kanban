@@ -89,6 +89,9 @@ func contractReplacesBoard(t *testing.T, s *contractState) {
 		if err != nil {
 			t.Fatalf("GetByID(%s) failed: %v", want.ID, err)
 		}
+		if want.Version < 1 {
+			want.Version = 1 // storage normalizes imported cards
+		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("GetByID(%s) returned %+v, want %+v", want.ID, got, want)
 		}

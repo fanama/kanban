@@ -15,6 +15,7 @@ func testUseCaseUpdateCardMovesACardBetweenColumnsAndGatesTheMove(t *testing.T) 
 	setDependencies(t, uc, late, early.ID)
 
 	// A partial edit keeps the fields it does not send.
+	late = findCard(t, uc, "Late")
 	edited := late
 	edited.Title = "Late, renamed"
 	edited.DependsOn = nil

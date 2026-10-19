@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"kanban-app/internal/domain"
@@ -71,6 +72,9 @@ func (h *HTTPHandler) handleCreateBoard(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
+	if h.renderRedirect(w, r, "/?board="+board.ID) {
+		return
+	}
 	r.URL.RawQuery = "board=" + board.ID
 	h.handleGetBoard(w, r)
 }
@@ -86,7 +90,29 @@ func (h *HTTPHandler) handleDeleteBoard(w http.ResponseWriter, r *http.Request) 
 	// Forget the cookie of the board that just vanished; handleGetBoard falls
 	// back to the first survivor anyway.
 	http.SetCookie(w, &http.Cookie{Name: boardCookie, Value: "", Path: "/", MaxAge: -1})
+	if isPatchRequest(r) {
+		fallback := h.selectBoard(w, r)
+		url := "/"
+		if fallback != "" {
+			url = "/?board=" + fallback
+		}
+		h.renderRedirect(w, r, url)
+		return
+	}
 	h.handleGetBoard(w, r)
+}
+
+// renderRedirect answers a JS mutation that must navigate after success: the
+// optimistic sidebar was already updated client-side, so this is just the URL.
+func (h *HTTPHandler) renderRedirect(w http.ResponseWriter, r *http.Request, url string) bool {
+	if !isPatchRequest(r) {
+		return false
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if err := json.NewEncoder(w).Encode(map[string]string{"type": "redirect", "url": url}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	return true
 }
 
 // boardName reads a board's title (used to name the downloaded file).

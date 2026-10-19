@@ -82,7 +82,7 @@ func ensureCards(ctx context.Context, repo ports.BoardRepository, board domain.B
 
 func demoCards(columnID string) []domain.Card {
 	return []domain.Card{
-		{ID: "card_1", Title: "Clean Architecture Design", ColumnID: columnID, Priority: domain.PriorityHigh},
-		{ID: "card_2", Title: "Wire HTMX Frontend", ColumnID: columnID, Priority: domain.PriorityMedium},
+		{ID: "card_1", Title: "Clean Architecture Design", ColumnID: columnID, Priority: domain.PriorityHigh, Version: 1},
+		{ID: "card_2", Title: "Wire HTMX Frontend", ColumnID: columnID, Priority: domain.PriorityMedium, Version: 1},
 	}
 }

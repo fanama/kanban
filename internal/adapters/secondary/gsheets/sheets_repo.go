@@ -14,7 +14,7 @@ import (
 )
 
 // header is the first row of the sheet; the column order must not change.
-var header = []any{"ID", "Title", "Status", "Priority", "Description", "Objective", "BlockedBy"}
+var header = []any{"ID", "Title", "Status", "Priority", "Description", "Objective", "BlockedBy", "Version"}
 
 // The board's columns live in their own tab, so they can be created and deleted.
 const columnsSheet = "Columns"
@@ -102,8 +102,8 @@ func newRepo(svc *sheets.Service, spreadsheetID, sheetName string) *Repo {
 		svc:          svc,
 		spreadsheet:  spreadsheetID,
 		sheet:        sheet,
-		dataRange:    fmt.Sprintf("%s!A2:G", sheet),
-		headerRange:  fmt.Sprintf("%s!A1:G1", sheet),
+		dataRange:    fmt.Sprintf("%s!A2:H", sheet),
+		headerRange:  fmt.Sprintf("%s!A1:H1", sheet),
 		columnsRange: fmt.Sprintf("%s!A2:C", columns),
 		columnsHead:  fmt.Sprintf("%s!A1:C1", columns),
 	}

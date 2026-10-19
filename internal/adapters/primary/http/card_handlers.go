@@ -8,32 +8,32 @@ import (
 
 func (h *HTTPHandler) handleAddCard(w http.ResponseWriter, r *http.Request) {
 	boardID := h.selectBoard(w, r)
-	board, err := h.cards.AddCard(r.Context(), boardID, r.FormValue("column_id"), r.FormValue("title"), domain.Priority(r.FormValue("priority")))
+	change, err := h.cards.AddCard(r.Context(), boardID, r.FormValue("column_id"), r.FormValue("title"), domain.Priority(r.FormValue("priority")))
 	if err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	h.renderBoard(w, r, board, boardID)
+	h.renderChange(w, r, change, boardID)
 }
 
 func (h *HTTPHandler) handleDeleteCard(w http.ResponseWriter, r *http.Request) {
 	boardID := h.selectBoard(w, r)
-	board, err := h.cards.DeleteCard(r.Context(), boardID, r.PathValue("id"))
+	change, err := h.cards.DeleteCard(r.Context(), boardID, r.PathValue("id"))
 	if err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	h.renderBoard(w, r, board, boardID)
+	h.renderChange(w, r, change, boardID)
 }
 
 func (h *HTTPHandler) handleMoveCard(w http.ResponseWriter, r *http.Request) {
 	boardID := h.selectBoard(w, r)
-	board, err := h.cards.MoveCard(r.Context(), boardID, r.FormValue("card_id"), r.FormValue("column_id"))
+	change, err := h.cards.MoveCard(r.Context(), boardID, r.FormValue("card_id"), r.FormValue("column_id"))
 	if err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	h.renderBoard(w, r, board, boardID)
+	h.renderChange(w, r, change, boardID)
 }
 
 // handleGetCard returns the read-only card fragment, used to leave edit mode.
@@ -74,7 +74,7 @@ func (h *HTTPHandler) handleEditForm(w http.ResponseWriter, r *http.Request) {
 
 // handleUpdateCard saves an edited card and returns the refreshed board.
 func (h *HTTPHandler) handleUpdateCard(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
+	if err := parseForm(r); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -87,6 +87,7 @@ func (h *HTTPHandler) handleUpdateCard(w http.ResponseWriter, r *http.Request) {
 		Objective:   r.FormValue("objective"),
 		ColumnID:    r.FormValue("column_id"),
 		Priority:    domain.Priority(r.FormValue("priority")),
+		Version:     atoiOrZero(r.FormValue("version")),
 	}
 	// The edit form always submits this field (empty when nothing is checked),
 	// so an absent field means "do not touch the constraints".
@@ -94,10 +95,10 @@ func (h *HTTPHandler) handleUpdateCard(w http.ResponseWriter, r *http.Request) {
 		edit.DependsOn = raw
 	}
 
-	board, err := h.cards.UpdateCard(r.Context(), boardID, edit)
+	change, err := h.cards.UpdateCard(r.Context(), boardID, edit)
 	if err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	h.renderBoard(w, r, board, boardID)
+	h.renderChange(w, r, change, boardID)
 }

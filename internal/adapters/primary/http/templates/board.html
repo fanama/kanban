@@ -1,16 +1,9 @@
 {{define "board"}}
-<main id="board" class="board-shell">
+<main id="board" class="board-shell" data-board-id="{{.BoardID}}">
   <aside class="sidebar" id="sidebar" aria-label="Boards and columns">
     <section class="sidebar-section">
       <h2 class="side-title">Boards</h2>
-      <nav class="boards">
-        {{range .Boards}}
-        <a class="board-tab{{if eq .ID $.BoardID}} active{{end}}" href="/?board={{.ID}}" title="Open this board">
-          <span class="board-dot" aria-hidden="true"></span>
-          <span class="board-tab-name">{{.Name}}</span>
-        </a>
-        {{end}}
-      </nav>
+      {{template "sidebar-boards" .}}
       <form action="/boards" method="post" hx-post="/boards" hx-target="#board" hx-swap="outerHTML" class="inline-form">
         <input type="text" name="name" placeholder="New board…" aria-label="New board name" required autocomplete="off">
         <button type="submit" class="button icon" title="Create a board" aria-label="Create a board">+</button>
@@ -45,14 +38,14 @@
         <p class="eyebrow">Board</p>
         <h1>{{if .Board.Name}}{{.Board.Name}}{{else}}Kanban{{end}}</h1>
       </div>
-      <p class="board-summary">{{.CardCount}} card{{if ne .CardCount 1}}s{{end}} · {{len .Columns}} list{{if ne (len .Columns) 1}}s{{end}}</p>
+      {{template "board-summary" .}}
     </div>
 
     <div class="columns">
       {{range .Columns}}
-      <section class="column" data-column-id="{{.Column.ID}}" aria-label="{{.Column.Name}}">
+      <section class="column" data-column-id="{{.Column.ID}}" data-column-position="{{.Column.Position}}" aria-label="{{.Column.Name}}">
         {{template "column-head" .}}
-        <div class="cards">
+        <div class="cards" data-column-cards>
           {{range .Cards}}{{template "card" .}}{{else}}<p class="empty">No cards yet</p>{{end}}
         </div>
         <details class="composer">
@@ -78,4 +71,19 @@
     </div>
   </section>
 </main>
+{{end}}
+
+{{define "sidebar-boards"}}
+<nav class="boards" data-sidebar-boards>
+  {{range .Boards}}
+  <a class="board-tab{{if eq .ID $.BoardID}} active{{end}}" href="/?board={{.ID}}" title="Open this board">
+    <span class="board-dot" aria-hidden="true"></span>
+    <span class="board-tab-name">{{.Name}}</span>
+  </a>
+  {{end}}
+</nav>
+{{end}}
+
+{{define "board-summary"}}
+<p class="board-summary" data-board-summary>{{.CardCount}} card{{if ne .CardCount 1}}s{{end}} · {{len .Columns}} list{{if ne (len .Columns) 1}}s{{end}}</p>
 {{end}}

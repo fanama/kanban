@@ -8,12 +8,12 @@ import (
 
 func (h *HTTPHandler) handleAddColumn(w http.ResponseWriter, r *http.Request) {
 	boardID := h.selectBoard(w, r)
-	board, err := h.columns.AddColumn(r.Context(), boardID, r.FormValue("name"))
+	change, err := h.columns.AddColumn(r.Context(), boardID, r.FormValue("name"))
 	if err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	h.renderBoard(w, r, board, boardID)
+	h.renderChange(w, r, change, boardID)
 }
 
 // columnViewOf locates a column's rendered head in the current board, for the
@@ -57,20 +57,20 @@ func (h *HTTPHandler) handleRenameForm(w http.ResponseWriter, r *http.Request) {
 // handleRenameColumn saves a renamed column and returns the refreshed board.
 func (h *HTTPHandler) handleRenameColumn(w http.ResponseWriter, r *http.Request) {
 	boardID := h.selectBoard(w, r)
-	board, err := h.columns.RenameColumn(r.Context(), boardID, r.PathValue("id"), r.FormValue("name"))
+	change, err := h.columns.RenameColumn(r.Context(), boardID, r.PathValue("id"), r.FormValue("name"))
 	if err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	h.renderBoard(w, r, board, boardID)
+	h.renderChange(w, r, change, boardID)
 }
 
 func (h *HTTPHandler) handleDeleteColumn(w http.ResponseWriter, r *http.Request) {
 	boardID := h.selectBoard(w, r)
-	board, err := h.columns.DeleteColumn(r.Context(), boardID, r.PathValue("id"))
+	change, err := h.columns.DeleteColumn(r.Context(), boardID, r.PathValue("id"))
 	if err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	h.renderBoard(w, r, board, boardID)
+	h.renderChange(w, r, change, boardID)
 }

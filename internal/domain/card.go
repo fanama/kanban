@@ -3,6 +3,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -29,6 +30,71 @@ type Card struct {
 	DependsOn   []string `json:"depends_on"`
 	ColumnID    string   `json:"column_id"`
 	Priority    Priority `json:"priority"`
+	// Version increments on every edit and move. An edit carries the version
+	// it started from so a stale save can be refused instead of silently
+	// overwriting someone else's change.
+	Version int `json:"version,omitempty"`
+}
+
+// UnmarshalJSON accepts depends_on as either an array of card IDs or a single
+// comma/semicolon-separated string. Board files written by hand or by another
+// exporter commonly use the latter form.
+func (c *Card) UnmarshalJSON(data []byte) error {
+	type cardAlias Card
+	aux := struct {
+		DependsOn json.RawMessage `json:"depends_on"`
+		*cardAlias
+	}{cardAlias: (*cardAlias)(c)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	dependsOn, err := parseDependsOn(aux.DependsOn)
+	if err != nil {
+		return err
+	}
+	c.DependsOn = dependsOn
+	return nil
+}
+
+func parseDependsOn(raw json.RawMessage) ([]string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	if raw[0] == '"' {
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return nil, fmt.Errorf("depends_on: %w", err)
+		}
+		return splitConstraintString(value), nil
+	}
+	if raw[0] == '[' {
+		var values []string
+		if err := json.Unmarshal(raw, &values); err != nil {
+			return nil, fmt.Errorf("depends_on: %w", err)
+		}
+		return cleanConstraintIDs(values), nil
+	}
+	return nil, fmt.Errorf("depends_on must be a string or an array of strings")
+}
+
+// splitConstraintString accepts the same separators the Sheets cell uses.
+func splitConstraintString(value string) []string {
+	return cleanConstraintIDs(strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n'
+	}))
+}
+
+func cleanConstraintIDs(values []string) []string {
+	cleaned := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			cleaned = append(cleaned, value)
+		}
+	}
+	if len(cleaned) == 0 {
+		return nil
+	}
+	return cleaned
 }
 
 // IsValid reports whether the priority is one the domain accepts.

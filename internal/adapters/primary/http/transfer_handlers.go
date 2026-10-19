@@ -54,12 +54,12 @@ func (h *HTTPHandler) handleImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	boardID := h.selectBoard(w, r)
-	board, err := h.transfer.ImportBoard(r.Context(), boardID, snapshot)
+	change, err := h.transfer.ImportBoard(r.Context(), boardID, snapshot)
 	if err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	h.renderBoard(w, r, board, boardID)
+	h.renderChange(w, r, change, boardID)
 }
 
 // readBoardFile reads the JSON the client sent: an uploaded file (as the

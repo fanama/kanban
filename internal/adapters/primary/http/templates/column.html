@@ -1,5 +1,5 @@
 {{define "column-head"}}
-<h2 class="column-head">
+<h2 class="column-head" data-column-head>
   <span class="name">{{.Column.Name}}</span>
   <span class="count" aria-label="{{len .Cards}} cards">{{len .Cards}}</span>
   <span class="column-actions">
@@ -17,7 +17,7 @@
 {{end}}
 
 {{define "column-head-edit"}}
-<h2 class="column-head renaming">
+<h2 class="column-head renaming" data-column-head>
   <form action="/columns/{{.Column.ID}}/rename" method="post" hx-post="/columns/{{.Column.ID}}/rename"
         hx-target="#board" hx-swap="outerHTML" class="rename-form">
     <input type="text" name="name" value="{{.Column.Name}}" aria-label="List name" required>

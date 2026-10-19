@@ -66,11 +66,11 @@ func testTransferImportBoardRebuildsTheBoardFromASnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateBoard failed: %v", err)
 	}
-	board, err := fresh.Transfer.ImportBoard(ctx, workspace.ID, snapshot)
+	change, err := fresh.Transfer.ImportBoard(ctx, workspace.ID, snapshot)
 	if err != nil {
 		t.Fatalf("ImportBoard failed: %v", err)
 	}
-	assertSnapshotImport(t, board, eraseMe, early)
+	assertSnapshotImport(t, change.Board, eraseMe, early)
 
 	// The same file imports cleanly again: a snapshot does not decay.
 	if _, err := fresh.Transfer.ImportBoard(ctx, workspace.ID, snapshot); err != nil {

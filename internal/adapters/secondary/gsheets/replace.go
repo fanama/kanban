@@ -41,7 +41,7 @@ func (r *Repo) replaceCards(ctx context.Context, oldRows [][]any, cards []domain
 		return nil
 	}
 
-	writeRange := fmt.Sprintf("%s!A2:G%d", r.sheet, len(values)+1)
+	writeRange := fmt.Sprintf("%s!A2:H%d", r.sheet, len(values)+1)
 	if _, err := r.svc.Spreadsheets.Values.
 		Update(r.spreadsheet, writeRange, &sheets.ValueRange{Values: values}).
 		ValueInputOption("RAW").

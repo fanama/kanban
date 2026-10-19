@@ -1,6 +1,8 @@
 {{define "card"}}
 <article class="card prio-{{.Priority}}"
          data-card-id="{{.ID}}"
+         data-column-id="{{.ColumnID}}"
+         data-version="{{.Version}}"
          {{if .Prev}}data-prev-column="{{.Prev.ID}}"{{end}}
          {{if .Next}}data-next-column="{{.Next.ID}}"{{end}}
          {{if and .Next (not .Blockers) (not .Teamed)}}data-can-advance="true"{{end}}
@@ -8,8 +10,8 @@
   <h3 class="card-title">
     <button type="button" class="card-title-button" data-card-open="{{.ID}}">{{.Title}}</button>
   </h3>
-  {{if .Description}}<p class="desc">{{.Description}}</p>{{end}}
-  {{if .Objective}}<p class="field"><span>Objective</span>{{.Objective}}</p>{{end}}
+  {{if .Description}}<div class="desc md" data-markdown>{{.Description}}</div>{{end}}
+  {{if .Objective}}<div class="field"><span>Objective</span><div class="md" data-markdown>{{.Objective}}</div></div>{{end}}
   {{if .Blockers}}<p class="blocked">Blocked by {{range $i, $b := .Blockers}}{{if $i}}, {{end}}{{$b.Title}}{{end}}</p>{{end}}
   {{if .Teamed}}<p class="blocked">{{range $i, $t := .Teamed}}{{if $i}}, {{end}}{{$t.Title}}{{end}} still wait{{if eq (len .Teamed) 1}}s{{end}} for this card</p>{{end}}
   <div class="card-foot">
@@ -47,7 +49,8 @@
 
 {{define "card-form"}}
 <article class="card card-form prio-{{.Priority}}">
-  <form action="/cards/{{.ID}}" method="post" hx-post="/cards/{{.ID}}" hx-target="#board" hx-swap="outerHTML">
+  <form action="/cards/{{.ID}}" method="post" hx-post="/cards/{{.ID}}" hx-target="#board" hx-swap="outerHTML" data-optimistic data-editing-card="{{.ID}}">
+    <input type="hidden" name="version" value="{{.Version}}">
     <label class="field-label">Title
       <input type="text" name="title" value="{{.Title}}" required>
     </label>

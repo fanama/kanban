@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"kanban-app/internal/domain"
+	"kanban-app/internal/events"
 	"kanban-app/internal/ports"
 )
 
@@ -15,87 +16,111 @@ type columnService struct {
 	reader  boardReader
 	ids     *idGenerator
 	cascade cascader
+	pub     events.Publisher
 }
 
 // AddColumn appends a column at the end of the board.
-func (s *columnService) AddColumn(ctx context.Context, boardID, name string) (domain.BoardView, error) {
+func (s *columnService) AddColumn(ctx context.Context, boardID, name string) (ports.BoardChange, error) {
 	name = domain.CleanColumnName(name)
 	if name == "" {
-		return domain.BoardView{}, domain.ErrEmptyColumnName
+		return ports.BoardChange{}, domain.ErrEmptyColumnName
 	}
 
 	board, err := s.reader.get(ctx, boardID)
 	if err != nil {
-		return domain.BoardView{}, err
+		return ports.BoardChange{}, err
 	}
 	for _, column := range board.Columns {
 		if strings.EqualFold(column.Column.Name, name) {
-			return domain.BoardView{}, fmt.Errorf("%w: %s", domain.ErrColumnExists, name)
+			return ports.BoardChange{}, fmt.Errorf("%w: %s", domain.ErrColumnExists, name)
 		}
 	}
 
 	column := domain.Column{ID: s.ids.next("col"), Name: name, Position: len(board.Columns)}
 	if _, err := s.repo.CreateColumn(ctx, boardID, column); err != nil {
-		return domain.BoardView{}, err
+		return ports.BoardChange{}, err
 	}
-	return s.reader.get(ctx, boardID)
+	after, err := s.reader.get(ctx, boardID)
+	if err != nil {
+		return ports.BoardChange{}, err
+	}
+	notice := events.Notice{Kind: events.ColumnAdded, ColumnID: column.ID, ColumnName: column.Name}
+	change := changeFor(ctx, events.ColumnAdded, boardID, board, after, notice)
+	change.Reload = true
+	publishChange(ctx, s.pub, change)
+	return change, nil
 }
 
 // RenameColumn replaces a column's name: the column keeps its position and
 // its cards, so nothing else on the board changes.
-func (s *columnService) RenameColumn(ctx context.Context, boardID, columnID, name string) (domain.BoardView, error) {
+func (s *columnService) RenameColumn(ctx context.Context, boardID, columnID, name string) (ports.BoardChange, error) {
 	name = domain.CleanColumnName(name)
 	if name == "" {
-		return domain.BoardView{}, domain.ErrEmptyColumnName
+		return ports.BoardChange{}, domain.ErrEmptyColumnName
 	}
 
 	board, err := s.reader.get(ctx, boardID)
 	if err != nil {
-		return domain.BoardView{}, err
+		return ports.BoardChange{}, err
 	}
 	if _, ok := board.Column(columnID); !ok {
-		return domain.BoardView{}, fmt.Errorf("%w: %s", domain.ErrColumnNotFound, columnID)
+		return ports.BoardChange{}, fmt.Errorf("%w: %s", domain.ErrColumnNotFound, columnID)
 	}
 	for _, column := range board.Columns {
 		if column.Column.ID != columnID && strings.EqualFold(column.Column.Name, name) {
-			return domain.BoardView{}, fmt.Errorf("%w: %s", domain.ErrColumnExists, name)
+			return ports.BoardChange{}, fmt.Errorf("%w: %s", domain.ErrColumnExists, name)
 		}
 	}
 
 	if err := s.repo.RenameColumn(ctx, boardID, columnID, name); err != nil {
-		return domain.BoardView{}, err
+		return ports.BoardChange{}, err
 	}
-	return s.reader.get(ctx, boardID)
+	after, err := s.reader.get(ctx, boardID)
+	if err != nil {
+		return ports.BoardChange{}, err
+	}
+	notice := events.Notice{Kind: events.ColumnRenamed, ColumnID: columnID, ColumnName: name}
+	change := changeFor(ctx, events.ColumnRenamed, boardID, board, after, notice)
+	publishChange(ctx, s.pub, change)
+	return change, nil
 }
 
 // DeleteColumn removes a column and keeps its cards: they fall back to the
 // previous stage (or to the column that becomes the first one when the deleted
 // column is the first). The cards that depend on them follow, as always.
-func (s *columnService) DeleteColumn(ctx context.Context, boardID, columnID string) (domain.BoardView, error) {
+func (s *columnService) DeleteColumn(ctx context.Context, boardID, columnID string) (ports.BoardChange, error) {
 	board, err := s.reader.get(ctx, boardID)
 	if err != nil {
-		return domain.BoardView{}, err
+		return ports.BoardChange{}, err
 	}
 	doomed, ok := board.Column(columnID)
 	if !ok {
-		return domain.BoardView{}, fmt.Errorf("%w: %s", domain.ErrColumnNotFound, columnID)
+		return ports.BoardChange{}, fmt.Errorf("%w: %s", domain.ErrColumnNotFound, columnID)
 	}
 	if len(board.Columns) < 2 {
-		return domain.BoardView{}, domain.ErrLastColumn
+		return ports.BoardChange{}, domain.ErrLastColumn
 	}
 	fallback, ok := deleteFallback(board, doomed.Column)
 	if !ok {
-		return domain.BoardView{}, domain.ErrColumnNotFound
+		return ports.BoardChange{}, domain.ErrColumnNotFound
 	}
 
 	orphans := append([]domain.Card(nil), doomed.Cards...)
 	if err := s.repo.DeleteColumn(ctx, boardID, columnID); err != nil {
-		return domain.BoardView{}, err
+		return ports.BoardChange{}, err
 	}
 	if err := s.moveCards(ctx, boardID, orphans, fallback.ID); err != nil {
-		return domain.BoardView{}, err
+		return ports.BoardChange{}, err
 	}
-	return s.settleOrphans(ctx, boardID, orphans)
+	after, err := s.settleOrphans(ctx, boardID, orphans)
+	if err != nil {
+		return ports.BoardChange{}, err
+	}
+	notice := events.Notice{Kind: events.ColumnDeleted, ColumnID: columnID, ColumnName: doomed.Column.Name}
+	change := changeFor(ctx, events.ColumnDeleted, boardID, board, after, notice)
+	change.Reload = true
+	publishChange(ctx, s.pub, change)
+	return change, nil
 }
 
 // deleteFallback chooses the column receiving the cards of the deleted one:

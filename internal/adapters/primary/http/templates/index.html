@@ -8,6 +8,9 @@
   <link rel="stylesheet" href="/static/style.css">
   <script>document.documentElement.classList.add('js');</script>
   <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
+  <script src="/static/vendor/marked.min.js?v=15.0.7" defer></script>
+  <script src="/static/vendor/purify.min.js?v=3.2.4" defer></script>
+  <script type="module" src="/static/app.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#board">Skip to the board</a>
@@ -20,21 +23,28 @@
       </button>
       <span class="brand-mark" aria-hidden="true">K</span>
       <span class="brand-name">Kanban</span>
+      <span id="live-status" class="live-status" data-state="connecting" aria-live="polite">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span>Connecting…</span>
+      </span>
     </div>
 
-    <details class="menu board-tools">
-      <summary class="button subtle">Board tools</summary>
-      <div class="menu-panel">
-        <form action="/import.json" method="post" enctype="multipart/form-data"
-              hx-post="/import.json" hx-encoding="multipart/form-data"
-              hx-target="#board" hx-swap="outerHTML" class="import-form">
-          <label class="field-label" for="import-file">Load a board</label>
-          <input id="import-file" type="file" name="file" accept=".json,application/json" required>
-          <button type="submit" class="button primary">Load board…</button>
-        </form>
-        <a href="/export.json" download="kanban-board.json" class="button">Export JSON</a>
-      </div>
-    </details>
+    <div class="topbar-actions">
+      <button type="button" id="actor-chip" class="actor-chip" title="Change your display name">Someone</button>
+      <details class="menu board-tools">
+        <summary class="button subtle">Board tools</summary>
+        <div class="menu-panel">
+          <form action="/import.json" method="post" enctype="multipart/form-data"
+                hx-post="/import.json" hx-encoding="multipart/form-data"
+                hx-target="#board" hx-swap="outerHTML" class="import-form">
+            <label class="field-label" for="import-file">Load a board</label>
+            <input id="import-file" type="file" name="file" accept=".json,application/json" required>
+            <button type="submit" class="button primary">Load board…</button>
+          </form>
+          <a href="/export.json" download="kanban-board.json" class="button">Export JSON</a>
+        </div>
+      </details>
+    </div>
 
     <p id="flash" class="flash" role="status" hidden></p>
   </header>
@@ -50,158 +60,31 @@
     <div id="card-dialog-body" class="dialog-body"></div>
   </dialog>
 
-  <script>
-    (function () {
-      const body = document.body;
-      const flash = document.getElementById('flash');
-      const dialog = document.getElementById('card-dialog');
-      const dialogBody = document.getElementById('card-dialog-body');
-      const dialogFlash = document.getElementById('dialog-flash');
+  <dialog id="name-dialog" class="card-dialog name-dialog">
+    <div class="dialog-head">
+      <span class="eyebrow">Your name</span>
+    </div>
+    <p class="muted">What should teammates call you in live notifications?</p>
+    <input id="name-input" type="text" maxlength="40" placeholder="Your display name" autocomplete="nickname">
+    <div class="form-actions">
+      <button type="button" id="name-save" class="button primary">Save</button>
+      <button type="button" id="name-skip" class="button subtle">Skip</button>
+    </div>
+  </dialog>
 
-      function showError(message) {
-        if (!message) return;
-        if (flash) { flash.textContent = message; flash.hidden = false; }
-        if (dialogFlash && dialog && dialog.open) { dialogFlash.textContent = message; dialogFlash.hidden = false; }
-      }
-      function clearError() {
-        if (flash) { flash.textContent = ''; flash.hidden = true; }
-        if (dialogFlash) { dialogFlash.textContent = ''; dialogFlash.hidden = true; }
-      }
+  <dialog id="conflict-dialog" class="card-dialog conflict-dialog">
+    <div class="dialog-head">
+      <span class="eyebrow">Concurrent edit</span>
+    </div>
+    <p id="conflict-text"></p>
+    <div class="form-actions">
+      <button type="button" id="conflict-reload" class="button">Reload</button>
+      <button type="button" id="conflict-overwrite" class="button danger">Overwrite</button>
+      <button type="button" id="conflict-keep" class="button subtle">Keep editing</button>
+    </div>
+  </dialog>
 
-      // The server sends the reason as plain text on 4xx/5xx; surface it
-      // instead of silently keeping the old board.
-      body.addEventListener('htmx:responseError', function (e) {
-        showError(e.detail.xhr.responseText.trim());
-      });
-      // Any successful mutation re-renders the board behind the dialog, so the
-      // dialog would otherwise show stale content.
-      body.addEventListener('htmx:afterRequest', function (e) {
-        if (!e.detail.successful) return;
-        clearError();
-        const verb = e.detail.requestConfig && e.detail.requestConfig.verb;
-        if (verb !== 'get') closeDialog();
-      });
-
-      // --- sidebar drawer (mobile) -----------------------------------------
-      const sidebarToggle = document.getElementById('sidebar-toggle');
-      function setSidebar(open) {
-        body.classList.toggle('sidebar-open', open);
-        if (sidebarToggle) sidebarToggle.setAttribute('aria-expanded', String(open));
-      }
-      if (sidebarToggle) {
-        sidebarToggle.addEventListener('click', function () {
-          setSidebar(!body.classList.contains('sidebar-open'));
-        });
-      }
-      document.addEventListener('click', function (e) {
-        if (e.target.closest('[data-sidebar-close]')) setSidebar(false);
-        if (e.target.closest('#sidebar a.board-tab')) setSidebar(false);
-        if (!e.target.closest('details.menu')) {
-          document.querySelectorAll('details.menu[open]').forEach(function (m) { m.open = false; });
-        }
-      });
-      document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') setSidebar(false);
-      });
-
-      // --- read-only card dialog -------------------------------------------
-      function closeDialog() {
-        if (dialog && dialog.open) dialog.close();
-        if (dialogBody) dialogBody.innerHTML = '';
-      }
-      document.addEventListener('click', async function (e) {
-        const opener = e.target.closest('[data-card-open]');
-        if (!opener) return;
-        e.preventDefault();
-        if (!dialog || !dialogBody) return;
-        try {
-          const res = await fetch('/cards/' + encodeURIComponent(opener.dataset.cardOpen), {
-            headers: { 'HX-Request': 'true' }
-          });
-          if (!res.ok) { showError((await res.text()).trim()); return; }
-          clearError();
-          dialogBody.innerHTML = await res.text();
-          if (window.htmx) window.htmx.process(dialogBody);
-          if (typeof dialog.showModal === 'function') dialog.showModal();
-          else dialog.setAttribute('open', '');
-        } catch (err) {
-          showError('Could not open the card. Try again.');
-        }
-      });
-      document.addEventListener('click', function (e) {
-        if (e.target.closest('[data-dialog-close]')) closeDialog();
-      });
-      if (dialog) {
-        dialog.addEventListener('click', function (e) {
-          if (e.target === dialog) closeDialog();
-        });
-        dialog.addEventListener('close', function () {
-          if (dialogBody) dialogBody.innerHTML = '';
-          clearError();
-        });
-      }
-
-      // --- native drag and drop (desktop) ----------------------------------
-      // A card may only land in an adjacent column: always the previous one,
-      // and the next one only when the stage rule allows the advance. The
-      // server still owns the final decision.
-      let dragged = null;
-      function clearDragState() {
-        document.querySelectorAll('.column.drop-ok').forEach(function (c) { c.classList.remove('drop-ok'); });
-        document.querySelectorAll('.card.dragging').forEach(function (c) { c.classList.remove('dragging'); });
-        dragged = null;
-      }
-      function accepts(columnId) {
-        if (!dragged) return false;
-        if (columnId === dragged.dataset.prevColumn) return true;
-        return columnId === dragged.dataset.nextColumn && dragged.dataset.canAdvance === 'true';
-      }
-      document.addEventListener('dragstart', function (e) {
-        const card = e.target.closest('article.card[data-card-id]');
-        if (!card || card.classList.contains('card-form')) { e.preventDefault(); return; }
-        dragged = card;
-        card.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', card.dataset.cardId);
-      });
-      document.addEventListener('dragend', clearDragState);
-      document.addEventListener('dragover', function (e) {
-        const column = e.target.closest('.column[data-column-id]');
-        if (!column || !dragged) return;
-        if (accepts(column.dataset.columnId)) {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          document.querySelectorAll('.column.drop-ok').forEach(function (c) {
-            if (c !== column) c.classList.remove('drop-ok');
-          });
-          column.classList.add('drop-ok');
-        } else {
-          column.classList.remove('drop-ok');
-        }
-      });
-      document.addEventListener('dragleave', function (e) {
-        const column = e.target.closest('.column[data-column-id]');
-        if (column && !column.contains(e.relatedTarget)) column.classList.remove('drop-ok');
-      });
-      document.addEventListener('drop', function (e) {
-        const column = e.target.closest('.column[data-column-id]');
-        if (!column || !dragged) return;
-        e.preventDefault();
-        const cardId = dragged.dataset.cardId;
-        const columnId = column.dataset.columnId;
-        const allowed = accepts(columnId);
-        clearDragState();
-        if (!allowed) return;
-        if (window.htmx) {
-          window.htmx.ajax('POST', '/cards/move', {
-            target: '#board',
-            swap: 'outerHTML',
-            values: { card_id: cardId, column_id: columnId }
-          });
-        }
-      });
-    })();
-  </script>
+  <div id="toast-region" class="toast-region" aria-live="polite" role="status"></div>
 </body>
 </html>
 {{end}}

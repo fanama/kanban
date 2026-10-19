@@ -9,7 +9,7 @@ import (
 	"kanban-app/internal/domain"
 )
 
-const selectColumns = `id, title, description, objective, status, priority`
+const selectColumns = `id, title, description, objective, status, priority, version`
 
 func (r *Repo) GetAll(ctx context.Context, boardID string) ([]domain.Card, error) {
 	if err := r.requireBoard(ctx, boardID); err != nil {
@@ -33,7 +33,7 @@ func (r *Repo) GetAll(ctx context.Context, boardID string) ([]domain.Card, error
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("sqlite: read cards: %w", err)
 	}
-	dependencies, err := r.loadDependencies(ctx)
+	dependencies, err := r.loadDependencies(ctx, boardID)
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +70,9 @@ func (r *Repo) Create(ctx context.Context, boardID string, c domain.Card) (domai
 	if err := r.requireBoard(ctx, boardID); err != nil {
 		return domain.Card{}, err
 	}
+	if c.Version <= 0 {
+		c.Version = 1
+	}
 	err := r.inTx(ctx, func(tx *sql.Tx) error {
 		return insertCardTx(ctx, tx, boardID, c)
 	})
@@ -83,10 +86,13 @@ func (r *Repo) Create(ctx context.Context, boardID string, c domain.Card) (domai
 }
 
 func insertCardTx(ctx context.Context, tx *sql.Tx, boardID string, c domain.Card) error {
+	if c.Version <= 0 {
+		c.Version = 1
+	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO cards (id, title, description, objective, status, priority, board_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.Title, c.Description, c.Objective, c.ColumnID, string(c.Priority), boardID); err != nil {
+		`INSERT INTO cards (id, title, description, objective, status, priority, version, board_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.Title, c.Description, c.Objective, c.ColumnID, string(c.Priority), c.Version, boardID); err != nil {
 		return err
 	}
 	return insertDependencies(ctx, tx, c.ID, c.DependsOn)
@@ -100,7 +106,7 @@ func (r *Repo) Update(ctx context.Context, boardID string, c domain.Card) error 
 		return updateCardTx(ctx, tx, boardID, c)
 	})
 	switch {
-	case errors.Is(err, domain.ErrCardNotFound), errors.Is(err, domain.ErrUnknownDependency):
+	case errors.Is(err, domain.ErrCardNotFound), errors.Is(err, domain.ErrCardConflict), errors.Is(err, domain.ErrUnknownDependency):
 		return err
 	case err != nil:
 		return fmt.Errorf("sqlite: update card %s: %w", c.ID, err)
@@ -109,11 +115,19 @@ func (r *Repo) Update(ctx context.Context, boardID string, c domain.Card) error 
 }
 
 func updateCardTx(ctx context.Context, tx *sql.Tx, boardID string, c domain.Card) error {
+	current, err := currentVersion(ctx, tx, boardID, c.ID)
+	if err != nil {
+		return err
+	}
+	if c.Version > 0 && current != c.Version {
+		return domain.ErrCardConflict
+	}
+	version := current + 1
 	res, err := tx.ExecContext(ctx,
 		`UPDATE cards
-		    SET title = ?, description = ?, objective = ?, status = ?, priority = ?
+		    SET title = ?, description = ?, objective = ?, status = ?, priority = ?, version = ?
 		  WHERE id = ? AND board_id = ?`,
-		c.Title, c.Description, c.Objective, c.ColumnID, string(c.Priority), c.ID, boardID)
+		c.Title, c.Description, c.Objective, c.ColumnID, string(c.Priority), version, c.ID, boardID)
 	if err != nil {
 		return err
 	}
@@ -130,9 +144,24 @@ func updateCardTx(ctx context.Context, tx *sql.Tx, boardID string, c domain.Card
 	return insertDependencies(ctx, tx, c.ID, c.DependsOn)
 }
 
+func currentVersion(ctx context.Context, tx *sql.Tx, boardID, cardID string) (int, error) {
+	var version int
+	err := tx.QueryRowContext(ctx,
+		`SELECT version FROM cards WHERE id = ? AND board_id = ?`, cardID, boardID).Scan(&version)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return 0, domain.ErrCardNotFound
+	case err != nil:
+		return 0, err
+	}
+	return version, nil
+}
+
 func (r *Repo) UpdateColumn(ctx context.Context, boardID, cardID, columnID string) error {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE cards SET status = ? WHERE id = ? AND board_id = ?`, columnID, cardID, boardID)
+		`UPDATE cards
+		    SET status = ?, version = version + 1
+		  WHERE id = ? AND board_id = ?`, columnID, cardID, boardID)
 	if err != nil {
 		return fmt.Errorf("sqlite: move card %s: %w", cardID, err)
 	}
@@ -178,9 +207,13 @@ func insertDependencies(ctx context.Context, tx *sql.Tx, cardID string, deps []s
 	return nil
 }
 
-func (r *Repo) loadDependencies(ctx context.Context) (map[string][]string, error) {
+func (r *Repo) loadDependencies(ctx context.Context, boardID string) (map[string][]string, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT card_id, depends_on_id FROM card_dependencies ORDER BY card_id, position`)
+		`SELECT d.card_id, d.depends_on_id
+		   FROM card_dependencies d
+		   JOIN cards c ON c.id = d.card_id
+		  WHERE c.board_id = ?
+		  ORDER BY d.card_id, d.position`, boardID)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: read dependencies: %w", err)
 	}

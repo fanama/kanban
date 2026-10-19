@@ -91,7 +91,8 @@ type scanner interface{ Scan(dest ...any) error }
 
 func scanCard(s scanner) (domain.Card, error) {
 	var id, title, description, objective, columnID, priority string
-	if err := s.Scan(&id, &title, &description, &objective, &columnID, &priority); err != nil {
+	var version int
+	if err := s.Scan(&id, &title, &description, &objective, &columnID, &priority, &version); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Card{}, err
 		}
@@ -104,5 +105,6 @@ func scanCard(s scanner) (domain.Card, error) {
 		Objective:   objective,
 		ColumnID:    columnID,
 		Priority:    domain.Priority(priority).Normalize(),
+		Version:     version,
 	}, nil
 }

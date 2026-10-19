@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"kanban-app/internal/domain"
+	"kanban-app/internal/events"
 	"kanban-app/internal/ports"
 )
 
@@ -13,6 +14,7 @@ import (
 type transferService struct {
 	repo   ports.BoardRepository
 	reader boardReader
+	pub    events.Publisher
 }
 
 // ExportBoard returns one board as a snapshot meant to travel: the columns in
@@ -29,19 +31,36 @@ func (s *transferService) ExportBoard(ctx context.Context, boardID string) (doma
 // file. The same rules the live board obeys are applied: a title is mandatory,
 // a constraint must exist and cannot be the card itself or form a cycle. A card
 // whose column does not exist in the file falls back to the first column.
-func (s *transferService) ImportBoard(ctx context.Context, boardID string, snapshot domain.BoardSnapshot) (domain.BoardView, error) {
+func (s *transferService) ImportBoard(ctx context.Context, boardID string, snapshot domain.BoardSnapshot) (ports.BoardChange, error) {
+	before, err := s.reader.get(ctx, boardID)
+	if err != nil {
+		return ports.BoardChange{}, err
+	}
 	columns, err := importColumns(snapshot.Columns)
 	if err != nil {
-		return domain.BoardView{}, err
+		return ports.BoardChange{}, err
 	}
 	cards, err := importCards(snapshot.Cards, columns)
 	if err != nil {
-		return domain.BoardView{}, err
+		return ports.BoardChange{}, err
+	}
+	for i := range cards {
+		if cards[i].Version < 1 {
+			cards[i].Version = 1
+		}
 	}
 	if err := s.repo.ReplaceBoard(ctx, boardID, columns, cards); err != nil {
-		return domain.BoardView{}, err
+		return ports.BoardChange{}, err
 	}
-	return s.reader.get(ctx, boardID)
+	after, err := s.reader.get(ctx, boardID)
+	if err != nil {
+		return ports.BoardChange{}, err
+	}
+	notice := events.Notice{Kind: events.BoardImported, BoardID: boardID}
+	change := changeFor(ctx, events.BoardImported, boardID, before, after, notice)
+	change.Reload = true
+	publishChange(ctx, s.pub, change)
+	return change, nil
 }
 
 // importCards normalizes, places and validates the cards of an import file.

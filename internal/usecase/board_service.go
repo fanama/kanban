@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"kanban-app/internal/domain"
+	"kanban-app/internal/events"
 	"kanban-app/internal/ports"
 )
 
@@ -14,6 +16,7 @@ type boardService struct {
 	repo   ports.BoardRepository
 	reader boardReader
 	ids    *idGenerator
+	pub    events.Publisher
 }
 
 func (s *boardService) ListBoards(ctx context.Context) ([]domain.Board, error) {
@@ -48,6 +51,7 @@ func (s *boardService) CreateBoard(ctx context.Context, name string) (domain.Boa
 			return domain.Board{}, err
 		}
 	}
+	publishBoardEvent(ctx, s.pub, events.BoardCreated, board)
 	return board, nil
 }
 
@@ -61,7 +65,29 @@ func (s *boardService) DeleteBoard(ctx context.Context, id string) error {
 	if len(boards) <= 1 {
 		return domain.ErrLastBoard
 	}
-	return s.repo.DeleteBoard(ctx, id)
+	var name string
+	for _, board := range boards {
+		if board.ID == id {
+			name = board.Name
+		}
+	}
+	if err := s.repo.DeleteBoard(ctx, id); err != nil {
+		return err
+	}
+	publishBoardEvent(ctx, s.pub, events.BoardDeleted, domain.Board{ID: id, Name: name})
+	return nil
+}
+
+func publishBoardEvent(ctx context.Context, publisher events.Publisher, kind events.Kind, board domain.Board) {
+	if publisher == nil {
+		return
+	}
+	author := events.Actor(ctx)
+	publisher.Publish(events.Event{
+		Kind: kind, BoardID: board.ID, BoardName: board.Name,
+		Actor: author, ClientID: events.ClientID(ctx), At: time.Now(),
+		Notice: events.Notice{Kind: kind, Actor: author, BoardID: board.ID, BoardName: board.Name},
+	})
 }
 
 // GetBoard returns one board's columns in order, each with its cards.

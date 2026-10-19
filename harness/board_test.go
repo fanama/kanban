@@ -15,6 +15,7 @@ import (
 	primaryHTTP "kanban-app/internal/adapters/primary/http"
 	memoryRepo "kanban-app/internal/adapters/secondary/memory"
 	"kanban-app/internal/domain"
+	"kanban-app/internal/events"
 	"kanban-app/internal/ports"
 	"kanban-app/internal/usecase"
 )
@@ -39,35 +40,39 @@ func (b board) GetBoard(ctx context.Context) (domain.BoardView, error) {
 }
 
 func (b board) AddCard(ctx context.Context, title string, priority domain.Priority) (domain.BoardView, error) {
-	return b.CardService.AddCard(ctx, b.id, "", title, priority)
+	return changed(b.CardService.AddCard(ctx, b.id, "", title, priority))
 }
 
 func (b board) AddCardTo(ctx context.Context, columnID, title string, priority domain.Priority) (domain.BoardView, error) {
-	return b.CardService.AddCard(ctx, b.id, columnID, title, priority)
+	return changed(b.CardService.AddCard(ctx, b.id, columnID, title, priority))
 }
 
 func (b board) UpdateCard(ctx context.Context, card domain.Card) (domain.BoardView, error) {
-	return b.CardService.UpdateCard(ctx, b.id, card)
+	return changed(b.CardService.UpdateCard(ctx, b.id, card))
 }
 
 func (b board) MoveCard(ctx context.Context, cardID, columnID string) (domain.BoardView, error) {
-	return b.CardService.MoveCard(ctx, b.id, cardID, columnID)
+	return changed(b.CardService.MoveCard(ctx, b.id, cardID, columnID))
 }
 
 func (b board) DeleteCard(ctx context.Context, cardID string) (domain.BoardView, error) {
-	return b.CardService.DeleteCard(ctx, b.id, cardID)
+	return changed(b.CardService.DeleteCard(ctx, b.id, cardID))
 }
 
 func (b board) AddColumn(ctx context.Context, name string) (domain.BoardView, error) {
-	return b.ColumnService.AddColumn(ctx, b.id, name)
+	return changed(b.ColumnService.AddColumn(ctx, b.id, name))
 }
 
 func (b board) DeleteColumn(ctx context.Context, columnID string) (domain.BoardView, error) {
-	return b.ColumnService.DeleteColumn(ctx, b.id, columnID)
+	return changed(b.ColumnService.DeleteColumn(ctx, b.id, columnID))
 }
 
 func (b board) RenameColumn(ctx context.Context, columnID, name string) (domain.BoardView, error) {
-	return b.ColumnService.RenameColumn(ctx, b.id, columnID, name)
+	return changed(b.ColumnService.RenameColumn(ctx, b.id, columnID, name))
+}
+
+func changed(change ports.BoardChange, err error) (domain.BoardView, error) {
+	return change.Board, err
 }
 
 func (b board) ExportBoard(ctx context.Context) (domain.BoardSnapshot, error) {
@@ -75,7 +80,7 @@ func (b board) ExportBoard(ctx context.Context) (domain.BoardSnapshot, error) {
 }
 
 func (b board) ImportBoard(ctx context.Context, snapshot domain.BoardSnapshot) (domain.BoardView, error) {
-	return b.ImportExportService.ImportBoard(ctx, b.id, snapshot)
+	return changed(b.ImportExportService.ImportBoard(ctx, b.id, snapshot))
 }
 
 // newBoard returns a use case over a fresh in-memory board with the given
@@ -153,6 +158,12 @@ func setDependencies(t *testing.T, uc board, card domain.Card, dependsOn ...stri
 
 func newHarness(t *testing.T) (*http.ServeMux, *httptest.Server) {
 	t.Helper()
+	mux, ts, _ := newHarnessWithBus(t)
+	return mux, ts
+}
+
+func newHarnessWithBus(t *testing.T) (*http.ServeMux, *httptest.Server, *events.Bus) {
+	t.Helper()
 
 	seed := []domain.Card{
 		{ID: "card_100", Title: "Ports & Adapters Unit Test", ColumnID: "To Do", Priority: domain.PriorityHigh},
@@ -168,8 +179,9 @@ func newHarness(t *testing.T) (*http.ServeMux, *httptest.Server) {
 		Cards: seed,
 	})
 
-	services := usecase.NewServices(repo)
-	handler, err := primaryHTTP.NewHTTPHandler(services.Board, services.Cards, services.Columns, services.Transfer, templateGlob, staticDir)
+	bus := events.NewBus()
+	services := usecase.NewServices(repo, bus)
+	handler, err := primaryHTTP.NewHTTPHandler(services.Board, services.Cards, services.Columns, services.Transfer, templateGlob, staticDir, bus)
 	if err != nil {
 		t.Fatalf("Handler init failed: %v", err)
 	}
@@ -178,7 +190,7 @@ func newHarness(t *testing.T) (*http.ServeMux, *httptest.Server) {
 	handler.RegisterRoutes(mux)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	return mux, ts
+	return mux, ts, bus
 }
 
 // get performs an HTMX GET and returns the status and the body.

@@ -56,6 +56,9 @@ func NewMemoryRepo(boards ...MemoryBoard) ports.BoardRepository {
 			cards:   make(map[string]bool, len(seed.Cards)),
 		}
 		for _, c := range seed.Cards {
+			if c.Version <= 0 {
+				c.Version = 1
+			}
 			m.cards[c.ID] = clone(c)
 			board.cards[c.ID] = true
 		}
@@ -171,6 +174,9 @@ func (r *memoryRepo) Create(ctx context.Context, boardID string, card domain.Car
 	if _, exists := r.cards[card.ID]; exists {
 		return domain.Card{}, domain.ErrCardExists
 	}
+	if card.Version <= 0 {
+		card.Version = 1
+	}
 	board.cards[card.ID] = true
 	r.cards[card.ID] = clone(card)
 	return clone(card), nil
@@ -184,6 +190,11 @@ func (r *memoryRepo) Update(ctx context.Context, boardID string, card domain.Car
 	if !ok || !board.cards[card.ID] {
 		return domain.ErrCardNotFound
 	}
+	stored := r.cards[card.ID]
+	if card.Version > 0 && stored.Version != card.Version {
+		return domain.ErrCardConflict
+	}
+	card.Version = stored.Version + 1
 	r.cards[card.ID] = clone(card)
 	return nil
 }
@@ -198,6 +209,7 @@ func (r *memoryRepo) UpdateColumn(ctx context.Context, boardID, cardID, columnID
 	}
 	c := clone(r.cards[cardID])
 	c.ColumnID = columnID
+	c.Version++
 	r.cards[cardID] = c
 	return nil
 }
@@ -317,6 +329,9 @@ func (r *memoryRepo) ReplaceBoard(ctx context.Context, boardID string, columns [
 	board.columns = domain.SortColumns(append([]domain.Column(nil), columns...))
 	board.cards = make(map[string]bool, len(cards))
 	for _, c := range cards {
+		if c.Version <= 0 {
+			c.Version = 1
+		}
 		r.cards[c.ID] = clone(c)
 		board.cards[c.ID] = true
 	}

@@ -67,10 +67,13 @@ func insertColumnsTx(ctx context.Context, tx *sql.Tx, boardID string, columns []
 
 func insertCardsTx(ctx context.Context, tx *sql.Tx, boardID string, cards []domain.Card) error {
 	for _, card := range cards {
+		if card.Version <= 0 {
+			card.Version = 1
+		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO cards (id, title, description, objective, status, priority, board_id)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			card.ID, card.Title, card.Description, card.Objective, card.ColumnID, string(card.Priority), boardID); err != nil {
+			`INSERT INTO cards (id, title, description, objective, status, priority, version, board_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			card.ID, card.Title, card.Description, card.Objective, card.ColumnID, string(card.Priority), card.Version, boardID); err != nil {
 			return err
 		}
 	}

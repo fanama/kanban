@@ -71,10 +71,10 @@ func assertReplaceWrites(t *testing.T, fake *fakeSheets) {
 		switch {
 		case strings.HasPrefix(update.Range, "Sheet1!A2:"):
 			cardWrites++
-			if update.Range != "Sheet1!A2:G3" {
+			if update.Range != "Sheet1!A2:H3" {
 				t.Errorf("Expected the cards block of 2 rows (one blank padding row), got %q", update.Range)
 			}
-			want := [][]string{{"imp_0", "Imported", "Only", "High", "", "", ""}, {"", "", "", "", "", "", ""}}
+			want := [][]string{{"imp_0", "Imported", "Only", "High", "", "", "", "1"}, {"", "", "", "", "", "", "", ""}}
 			if got := flatten(update.Values); !reflect.DeepEqual(got, want) {
 				t.Errorf("Cards tab rewritten as %v, want %v", got, want)
 			}
@@ -132,10 +132,10 @@ func TestSheetsRepoDeleteCardBlanksTheRow(t *testing.T) {
 	if err := repo.DeleteCard(context.Background(), "tab", "card_a"); err != nil {
 		t.Fatalf("DeleteCard failed: %v", err)
 	}
-	if len(fake.updates) != 1 || fake.updates[0].Range != "Sheet1!A2:G2" {
+	if len(fake.updates) != 1 || fake.updates[0].Range != "Sheet1!A2:H2" {
 		t.Fatalf("Expected exactly one write blanking row 2, got %+v", fake.updates)
 	}
-	want := [][]string{{"", "", "", "", "", "", ""}}
+	want := [][]string{{"", "", "", "", "", "", "", ""}}
 	if got := flatten(fake.updates[0].Values); !reflect.DeepEqual(got, want) {
 		t.Errorf("Expected the row blanked out, got %v", got)
 	}

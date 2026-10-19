@@ -33,10 +33,10 @@ func TestSheetsRepoPreparesAnEmptySpreadsheet(t *testing.T) {
 	}
 	for _, update := range fake.updates {
 		switch update.Range {
-		case "Sheet1!A1:G1":
+		case "Sheet1!A1:H1":
 			// The order and the names are a contract with the spreadsheets
 			// written by earlier versions: renaming a cell orphans its data.
-			want := []string{"ID", "Title", "Status", "Priority", "Description", "Objective", "BlockedBy"}
+			want := []string{"ID", "Title", "Status", "Priority", "Description", "Objective", "BlockedBy", "Version"}
 			if got := flatten(update.Values); !reflect.DeepEqual(got[0], want) {
 				t.Errorf("Card header is %v, want %v", got[0], want)
 			}

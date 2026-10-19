@@ -17,6 +17,8 @@ func TestExportImportHTTP(t *testing.T) {
 
 	testHTTPPOSTImportJsonReplacesTheBoard(t, ts)
 
+	testHTTPPOSTImportJsonAcceptsAStringConstraint(t, ts)
+
 	testHTTPPOSTImportJsonRefusesAFileThatIsNotABoard(t, ts)
 
 	testHTTPPOSTImportJsonWithoutAFileIsExplained(t, ts)
@@ -80,6 +82,29 @@ func testHTTPPOSTImportJsonReplacesTheBoard(t *testing.T, ts *httptest.Server) {
 	}
 	if strings.Contains(body, "Ports &amp; Adapters Unit Test") {
 		t.Errorf("Expected the previous cards to be gone: %s", body)
+	}
+}
+
+func testHTTPPOSTImportJsonAcceptsAStringConstraint(t *testing.T, ts *httptest.Server) {
+	payload := `{"columns":[{"id":"To Do","name":"To Do","position":0}],
+		"cards":[{"id":"s_1","title":"Blocks","column_id":"To Do","depends_on":"s_2"},
+			 {"id":"s_2","title":"Blocker","column_id":"To Do"}]}`
+	req, err := http.NewRequest("POST", ts.URL+"/import.json", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("Building the request failed: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("HTTP call failed: %v", err)
+	}
+	defer res.Body.Close()
+	body := readBody(t, res)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200 for a string constraint, got %d (%s)", res.StatusCode, body)
+	}
+	if !strings.Contains(body, "Blocks") || !strings.Contains(body, "Blocker") {
+		t.Errorf("Expected both imported cards in the response: %s", body)
 	}
 }
 
