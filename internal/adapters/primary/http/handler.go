@@ -51,6 +51,7 @@ func (h *HTTPHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /", h.withIdentity(h.handleGetBoard))
 	mux.HandleFunc("POST /cards", h.withIdentity(h.handleAddCard))
 	mux.HandleFunc("POST /cards/move", h.withIdentity(h.handleMoveCard))
+	mux.HandleFunc("POST /cards/reorder", h.withIdentity(h.handleReorderCard))
 	mux.HandleFunc("GET /cards/{id}", h.withIdentity(h.handleGetCard))
 	mux.HandleFunc("GET /cards/{id}/edit", h.withIdentity(h.handleEditForm))
 	mux.HandleFunc("POST /cards/{id}", h.withIdentity(h.handleUpdateCard))

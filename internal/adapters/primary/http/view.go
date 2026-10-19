@@ -146,6 +146,7 @@ func statusFor(err error) int {
 	case errors.Is(err, domain.ErrEmptyTitle),
 		errors.Is(err, domain.ErrCardBlocked),
 		errors.Is(err, domain.ErrWouldLeaveDependents),
+		errors.Is(err, domain.ErrNotSameColumn),
 		errors.Is(err, domain.ErrUnknownDependency),
 		errors.Is(err, domain.ErrSelfDependency),
 		errors.Is(err, domain.ErrDependencyCycle),

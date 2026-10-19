@@ -26,6 +26,7 @@ func TestUseCasesOverDynamicColumns(t *testing.T) {
 	testUseCaseTheBoardKeepsAtLeastOneColumn(t)
 	testUseCaseUpdateCardMovesACardBetweenColumnsAndGatesTheMove(t)
 	testUseCaseConstraintsAreValidated(t)
+	testUseCaseReordersCardsInsideAColumn(t)
 }
 
 func testUseCaseAddCardPutsTheCardInTheFirstColumn(t *testing.T) {

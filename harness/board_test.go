@@ -55,6 +55,10 @@ func (b board) MoveCard(ctx context.Context, cardID, columnID string) (domain.Bo
 	return changed(b.CardService.MoveCard(ctx, b.id, cardID, columnID))
 }
 
+func (b board) ReorderCard(ctx context.Context, cardID, beforeCardID string) (domain.BoardView, error) {
+	return changed(b.CardService.ReorderCard(ctx, b.id, cardID, beforeCardID))
+}
+
 func (b board) DeleteCard(ctx context.Context, cardID string) (domain.BoardView, error) {
 	return changed(b.CardService.DeleteCard(ctx, b.id, cardID))
 }

@@ -126,6 +126,62 @@ func (s *cardService) MoveCard(ctx context.Context, boardID, cardID, columnID st
 	})
 }
 
+// ReorderCard moves a card immediately before another card of the same column.
+// The stage rules do not change, so this is a pure display-order operation.
+func (s *cardService) ReorderCard(ctx context.Context, boardID, cardID, beforeCardID string) (ports.BoardChange, error) {
+	board, err := s.reader.get(ctx, boardID)
+	if err != nil {
+		return ports.BoardChange{}, err
+	}
+	card, _, err := reorderTargets(board, cardID, beforeCardID)
+	if err != nil {
+		return ports.BoardChange{}, err
+	}
+	if beforeCardID != "" && cardID == beforeCardID {
+		return ports.BoardChange{Board: board, Kind: events.CardMoved}, nil
+	}
+	if err := s.repo.MoveCardBefore(ctx, boardID, cardID, beforeCardID); err != nil {
+		return ports.BoardChange{}, err
+	}
+	return s.afterReorder(ctx, boardID, board, card)
+}
+
+func reorderTargets(board domain.BoardView, cardID, beforeCardID string) (domain.Card, domain.Card, error) {
+	index := board.Index()
+	card, ok := index[cardID]
+	if !ok {
+		return domain.Card{}, domain.Card{}, domain.ErrCardNotFound
+	}
+	if beforeCardID == "" {
+		return card, domain.Card{}, nil // append at the end of the card's column
+	}
+	before, ok := index[beforeCardID]
+	if !ok {
+		return domain.Card{}, domain.Card{}, fmt.Errorf("%w: %s", domain.ErrCardNotFound, beforeCardID)
+	}
+	if cardID != beforeCardID && card.ColumnID != before.ColumnID {
+		return domain.Card{}, domain.Card{}, fmt.Errorf("%w: %q and %q", domain.ErrNotSameColumn, card.Title, before.Title)
+	}
+	return card, before, nil
+}
+
+func (s *cardService) afterReorder(ctx context.Context, boardID string, board domain.BoardView, card domain.Card) (ports.BoardChange, error) {
+	after, err := s.reader.get(ctx, boardID)
+	if err != nil {
+		return ports.BoardChange{}, err
+	}
+	column, _ := after.Column(card.ColumnID)
+	change := changeFor(ctx, events.CardMoved, boardID, board, after, events.Notice{
+		Kind: events.CardMoved, CardID: card.ID, CardTitle: card.Title,
+		ColumnID: card.ColumnID, ColumnName: column.Column.Name,
+		From: column.Column.Name, To: column.Column.Name,
+	})
+	change.CardIDs = appendUnique(change.CardIDs, card.ID)
+	change.ColumnIDs = appendUnique(change.ColumnIDs, card.ColumnID)
+	publishChange(ctx, s.pub, change)
+	return change, nil
+}
+
 func (s *cardService) applyMove(ctx context.Context, boardID string, board domain.BoardView, card domain.Card, target domain.Column, from int) error {
 	if target.Position > from {
 		if err := checkStage(card, target, board); err != nil {

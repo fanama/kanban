@@ -16,7 +16,7 @@ func (r *Repo) GetAll(ctx context.Context, boardID string) ([]domain.Card, error
 		return nil, err
 	}
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+selectColumns+` FROM cards WHERE board_id = ? ORDER BY rowid`, boardID)
+		`SELECT `+selectColumns+` FROM cards WHERE board_id = ? ORDER BY position, rowid`, boardID)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: read cards: %w", err)
 	}
@@ -89,10 +89,14 @@ func insertCardTx(ctx context.Context, tx *sql.Tx, boardID string, c domain.Card
 	if c.Version <= 0 {
 		c.Version = 1
 	}
+	position, err := nextPositionTx(ctx, tx, boardID, c.ColumnID)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO cards (id, title, description, objective, status, priority, version, board_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.Title, c.Description, c.Objective, c.ColumnID, string(c.Priority), c.Version, boardID); err != nil {
+		`INSERT INTO cards (id, title, description, objective, status, priority, position, version, board_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.Title, c.Description, c.Objective, c.ColumnID, string(c.Priority), position, c.Version, boardID); err != nil {
 		return err
 	}
 	return insertDependencies(ctx, tx, c.ID, c.DependsOn)
@@ -115,19 +119,24 @@ func (r *Repo) Update(ctx context.Context, boardID string, c domain.Card) error 
 }
 
 func updateCardTx(ctx context.Context, tx *sql.Tx, boardID string, c domain.Card) error {
-	current, err := currentVersion(ctx, tx, boardID, c.ID)
+	current, currentColumn, position, err := currentState(ctx, tx, boardID, c.ID)
 	if err != nil {
 		return err
 	}
 	if c.Version > 0 && current != c.Version {
 		return domain.ErrCardConflict
 	}
+	if currentColumn != c.ColumnID {
+		if position, err = nextPositionTx(ctx, tx, boardID, c.ColumnID); err != nil {
+			return err
+		}
+	}
 	version := current + 1
 	res, err := tx.ExecContext(ctx,
 		`UPDATE cards
-		    SET title = ?, description = ?, objective = ?, status = ?, priority = ?, version = ?
+		    SET title = ?, description = ?, objective = ?, status = ?, priority = ?, position = ?, version = ?
 		  WHERE id = ? AND board_id = ?`,
-		c.Title, c.Description, c.Objective, c.ColumnID, string(c.Priority), version, c.ID, boardID)
+		c.Title, c.Description, c.Objective, c.ColumnID, string(c.Priority), position, version, c.ID, boardID)
 	if err != nil {
 		return err
 	}
@@ -144,34 +153,45 @@ func updateCardTx(ctx context.Context, tx *sql.Tx, boardID string, c domain.Card
 	return insertDependencies(ctx, tx, c.ID, c.DependsOn)
 }
 
-func currentVersion(ctx context.Context, tx *sql.Tx, boardID, cardID string) (int, error) {
-	var version int
+func currentState(ctx context.Context, tx *sql.Tx, boardID, cardID string) (int, string, int, error) {
+	var version, position int
+	var columnID string
 	err := tx.QueryRowContext(ctx,
-		`SELECT version FROM cards WHERE id = ? AND board_id = ?`, cardID, boardID).Scan(&version)
+		`SELECT version, status, position FROM cards WHERE id = ? AND board_id = ?`,
+		cardID, boardID).Scan(&version, &columnID, &position)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return 0, domain.ErrCardNotFound
+		return 0, "", 0, domain.ErrCardNotFound
 	case err != nil:
-		return 0, err
+		return 0, "", 0, err
 	}
-	return version, nil
+	return version, columnID, position, nil
 }
 
 func (r *Repo) UpdateColumn(ctx context.Context, boardID, cardID, columnID string) error {
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE cards
-		    SET status = ?, version = version + 1
-		  WHERE id = ? AND board_id = ?`, columnID, cardID, boardID)
+	err := r.inTx(ctx, func(tx *sql.Tx) error {
+		var current string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT status FROM cards WHERE id = ? AND board_id = ?`, cardID, boardID).Scan(&current); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return domain.ErrCardNotFound
+			}
+			return err
+		}
+		if current == columnID {
+			return nil
+		}
+		position, err := nextPositionTx(ctx, tx, boardID, columnID)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx,
+			`UPDATE cards SET status = ?, position = ?, version = version + 1
+			  WHERE id = ? AND board_id = ?`, columnID, position, cardID, boardID)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("sqlite: move card %s: %w", cardID, err)
-	}
-
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("sqlite: move card %s: %w", cardID, err)
-	}
-	if affected == 0 {
-		return domain.ErrCardNotFound
 	}
 	return nil
 }

@@ -59,6 +59,28 @@ func TestPatchHTTP(t *testing.T) {
 	if !strings.Contains(cardHTML, "data-markdown") || !strings.Contains(cardHTML, `data-version="2"`) {
 		t.Fatalf("Expected Markdown hooks and the new version in %q", cardHTML)
 	}
+
+	reordered := postPatch(t, ts.URL+"/cards/reorder", url.Values{
+		"card_id": {added.Notice.CardID}, "before_id": {"card_200"},
+	}, "Alice", "tab-a", nil)
+	assertReorderPatch(t, reordered, added.Notice.CardID, "card_200")
+}
+
+func assertReorderPatch(t *testing.T, patch patchResponse, cardID, beforeID string) {
+	t.Helper()
+	if patch.Event != "card.moved" {
+		t.Fatalf("Expected a card.moved reorder patch, got %+v", patch)
+	}
+	var columnHTML string
+	for _, fragment := range patch.Fragments {
+		if fragment.Target == "column-cards" && fragment.ID == "Doing" {
+			columnHTML = fragment.HTML
+		}
+	}
+	moved, target := strings.Index(columnHTML, cardID), strings.Index(columnHTML, beforeID)
+	if moved < 0 || target < 0 || moved > target {
+		t.Fatalf("Expected the reordered column fragment to put %s before %s: %q", cardID, beforeID, columnHTML)
+	}
 }
 
 // TestPatchMultipartEdit covers the browser path: actions.js posts FormData,

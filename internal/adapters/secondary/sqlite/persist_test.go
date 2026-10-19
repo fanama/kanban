@@ -52,8 +52,16 @@ func seedPersistedDatabase(t *testing.T, ctx context.Context, path string) {
 	if err := first.UpdateColumn(ctx, testBoard, "keep_me", "col_b"); err != nil {
 		t.Fatalf("UpdateColumn failed: %v", err)
 	}
+	reorderPersistedCards(t, ctx, first)
 	if err := first.Close(); err != nil {
 		t.Fatalf("Close failed: %v", err)
+	}
+}
+
+func reorderPersistedCards(t *testing.T, ctx context.Context, repo *Repo) {
+	t.Helper()
+	if err := repo.MoveCardBefore(ctx, testBoard, "keep_me", "foundation"); err != nil {
+		t.Fatalf("MoveCardBefore failed: %v", err)
 	}
 }
 
@@ -83,6 +91,25 @@ func verifyPersistedDatabase(t *testing.T, ctx context.Context, path string) {
 	}
 	if len(columns) != 2 || columns[0].Name != "To Do" || columns[1].Name != "Doing" {
 		t.Errorf("Columns did not survive the reopen: %+v", columns)
+	}
+
+	verifyPersistedOrder(t, ctx, second)
+}
+
+func verifyPersistedOrder(t *testing.T, ctx context.Context, repo *Repo) {
+	t.Helper()
+	cards, err := repo.GetAll(ctx, testBoard)
+	if err != nil {
+		t.Fatalf("GetAll after reopen failed: %v", err)
+	}
+	var order []string
+	for _, card := range cards {
+		if card.ColumnID == "col_b" {
+			order = append(order, card.ID)
+		}
+	}
+	if want := []string{"keep_me", "foundation"}; !reflect.DeepEqual(order, want) {
+		t.Errorf("Card order did not survive the reopen: got %v, want %v", order, want)
 	}
 }
 

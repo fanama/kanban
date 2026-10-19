@@ -27,6 +27,11 @@ type BoardRepository interface {
 	Create(ctx context.Context, boardID string, card domain.Card) (domain.Card, error)
 	Update(ctx context.Context, boardID string, card domain.Card) error
 	UpdateColumn(ctx context.Context, boardID, cardID, columnID string) error
+	// MoveCardBefore places cardID immediately before beforeCardID in the same
+	// column; an empty beforeCardID appends it at the end of its column.
+	// Storage order is what the board renders, so this only rewrites positions;
+	// neither card's version or fields change.
+	MoveCardBefore(ctx context.Context, boardID, cardID, beforeCardID string) error
 
 	DeleteCard(ctx context.Context, boardID, cardID string) error
 

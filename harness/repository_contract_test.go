@@ -53,6 +53,7 @@ func contract(t *testing.T, repo ports.BoardRepository) {
 	contractColumns(t, state)
 	contractRenamesColumns(t, state)
 	contractCards(t, state)
+	contractReordersCards(t, state)
 	contractCardReads(t, state)
 	contractCardUpdates(t, state)
 	contractCardMoves(t, state)

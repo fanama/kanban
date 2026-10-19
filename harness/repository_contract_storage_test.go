@@ -8,6 +8,57 @@ import (
 	"kanban-app/internal/domain"
 )
 
+func contractReordersCards(t *testing.T, s *contractState) {
+	t.Helper()
+
+	for _, id := range []string{"reorder_a", "reorder_b", "reorder_c"} {
+		_, err := s.repo.Create(s.ctx, s.boardA.ID, domain.Card{
+			ID: id, Title: id, ColumnID: "col_a", Priority: domain.PriorityLow,
+		})
+		if err != nil {
+			t.Fatalf("Create(%s) failed: %v", id, err)
+		}
+	}
+
+	if err := s.repo.MoveCardBefore(s.ctx, s.boardA.ID, "reorder_c", "reorder_a"); err != nil {
+		t.Fatalf("MoveCardBefore failed: %v", err)
+	}
+	want := []string{"contract_0", "reorder_c", "reorder_a", "reorder_b"}
+	if got := columnOrder(t, s, "col_a"); !reflect.DeepEqual(got, want) {
+		t.Errorf("Expected the reordered column %v, got %v", want, got)
+	}
+
+	if err := s.repo.MoveCardBefore(s.ctx, s.boardA.ID, "contract_0", ""); err != nil {
+		t.Fatalf("MoveCardBefore to the end failed: %v", err)
+	}
+	want = []string{"reorder_c", "reorder_a", "reorder_b", "contract_0"}
+	if got := columnOrder(t, s, "col_a"); !reflect.DeepEqual(got, want) {
+		t.Errorf("Expected the appended column %v, got %v", want, got)
+	}
+
+	if err := s.repo.MoveCardBefore(s.ctx, s.boardA.ID, "reorder_c", s.card.ID); !errors.Is(err, domain.ErrNotSameColumn) {
+		t.Errorf("Expected ErrNotSameColumn, got %v", err)
+	}
+	if err := s.repo.MoveCardBefore(s.ctx, s.boardA.ID, "reorder_c", "missing"); !errors.Is(err, domain.ErrCardNotFound) {
+		t.Errorf("Expected ErrCardNotFound, got %v", err)
+	}
+}
+
+func columnOrder(t *testing.T, s *contractState, columnID string) []string {
+	t.Helper()
+	cards, err := s.repo.GetAll(s.ctx, s.boardA.ID)
+	if err != nil {
+		t.Fatalf("GetAll failed: %v", err)
+	}
+	var ids []string
+	for _, card := range cards {
+		if card.ColumnID == columnID {
+			ids = append(ids, card.ID)
+		}
+	}
+	return ids
+}
+
 func contractDeletesCard(t *testing.T, s *contractState) {
 	t.Helper()
 

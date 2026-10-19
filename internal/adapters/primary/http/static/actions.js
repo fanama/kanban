@@ -368,8 +368,34 @@ async function handleConflict(form) {
   });
 }
 
+export function reorderCard(card, anchor, after) {
+  const parent = card.parentElement;
+  const next = card.nextElementSibling;
+  const reference = after ? anchor.nextElementSibling : anchor;
+  const beforeId = reference?.dataset.cardId || '';
+  parent.insertBefore(card, reference);
+  const body = new FormData();
+  body.set('card_id', card.dataset.cardId);
+  body.set('before_id', beforeId);
+  fetch('/cards/reorder', {
+    method: 'POST',
+    body,
+    headers: { ...identityHeaders(), 'X-Kanban-Patch': 'true' }
+  }).then(async (response) => {
+    const text = await response.text();
+    if (!response.ok) throw new Error(text);
+    applyPatch(JSON.parse(text), { fromSelf: true });
+    clearError();
+  }).catch((error) => {
+    if (next) parent.insertBefore(card, next);
+    else parent.append(card);
+    showError(error.message);
+  });
+}
+
 export function initDrag() {
   let dragged = null;
+  let dropAfter = false;
   document.addEventListener('dragstart', (event) => {
     const card = event.target.closest('article.card[data-card-id]');
     if (!card || card.classList.contains('card-form') || card.dataset.pending === 'true') {
@@ -377,28 +403,42 @@ export function initDrag() {
       return;
     }
     dragged = card;
+    dropAfter = false;
     card.classList.add('dragging');
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', card.dataset.cardId);
   });
   document.addEventListener('dragend', () => {
-    document.querySelectorAll('.column.drop-ok').forEach((node) => node.classList.remove('drop-ok'));
+    clearDropHints();
     dragged?.classList.remove('dragging');
     dragged = null;
+    dropAfter = false;
   });
   document.addEventListener('dragover', (event) => {
     const column = event.target.closest('.column[data-column-id]');
     if (!column || !dragged) return;
+    const target = reorderTarget(event.target.closest('article.card[data-card-id]'), dragged);
+    if (target) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      dropAfter = dropsAfter(target, event);
+      clearDropHints();
+      target.classList.add(dropAfter ? 'drop-after' : 'drop-before');
+      return;
+    }
     if (accepts(column.dataset.columnId)) {
       event.preventDefault();
       event.dataTransfer.dropEffect = 'move';
-      document.querySelectorAll('.column.drop-ok').forEach((node) => {
-        if (node !== column) node.classList.remove('drop-ok');
-      });
+      dropAfter = false;
+      clearDropHints();
       column.classList.add('drop-ok');
     }
   });
   document.addEventListener('dragleave', (event) => {
+    const card = event.target.closest('article.card[data-card-id]');
+    if (card && !card.contains(event.relatedTarget)) {
+      card.classList.remove('drop-before', 'drop-after');
+    }
     const column = event.target.closest('.column[data-column-id]');
     if (column && !column.contains(event.relatedTarget)) column.classList.remove('drop-ok');
   });
@@ -407,15 +447,34 @@ export function initDrag() {
     if (!column || !dragged) return;
     event.preventDefault();
     const card = dragged;
+    const target = reorderTarget(event.target.closest('article.card[data-card-id]'), card);
     const allowed = accepts(column.dataset.columnId);
-    document.querySelectorAll('.column.drop-ok').forEach((node) => node.classList.remove('drop-ok'));
+    const after = dropAfter;
+    clearDropHints();
     card.classList.remove('dragging');
     dragged = null;
-    if (allowed) moveCard(card, column.dataset.columnId);
+    dropAfter = false;
+    if (target) reorderCard(card, target, after);
+    else if (allowed) moveCard(card, column.dataset.columnId);
   });
+  function reorderTarget(card, source) {
+    if (!card || card === source || card.classList.contains('card-form')) return null;
+    if (card.dataset.pending === 'true') return null;
+    return card.dataset.columnId === source.dataset.columnId ? card : null;
+  }
   function accepts(columnId) {
     if (!dragged) return false;
     if (columnId === dragged.dataset.prevColumn) return true;
     return columnId === dragged.dataset.nextColumn && dragged.dataset.canAdvance === 'true';
+  }
+  function dropsAfter(target, event) {
+    const rect = target.getBoundingClientRect();
+    return event.clientY >= rect.top + rect.height / 2;
+  }
+  function clearDropHints() {
+    document.querySelectorAll('.column.drop-ok').forEach((node) => node.classList.remove('drop-ok'));
+    document.querySelectorAll('.card.drop-before, .card.drop-after').forEach((node) => {
+      node.classList.remove('drop-before', 'drop-after');
+    });
   }
 }

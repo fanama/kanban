@@ -21,6 +21,7 @@ func TestHTTPAdapter(t *testing.T) {
 	testHTTPMovingAConstraintPullsItsDependentsAlong(t, ts)
 	testHTTPGETCardsIdEditOffersTheColumnsAndTheConstraints(t, ts)
 	testHTTPPOSTCardsIdSavesTheEdit(t, ts)
+	testHTTPPOSTCardsReorderInsertsBeforeTarget(t, ts)
 	testHTTPPOSTColumnsAddsAndPOSTColumnsIdDeleteRemoves(t, ts)
 	testHTTPGETColumnsIdRenameOpensTheFormAndPOSTReplacesTheName(t, ts)
 	testHTTPGETCardsIdReturnsTheReadOnlyCard(t, ts)
@@ -240,6 +241,33 @@ func testHTTPPOSTCardsIdSavesTheEdit(t *testing.T, ts *httptest.Server) {
 	}
 	if status, _ := post(t, ts.URL+"/cards/ghost", url.Values{"title": {"Ghost"}, "column_id": {"Doing"}}); status != http.StatusNotFound {
 		t.Errorf("Expected 404 for an unknown card, got %d", status)
+	}
+}
+
+func testHTTPPOSTCardsReorderInsertsBeforeTarget(t *testing.T, ts *httptest.Server) {
+	status, body := post(t, ts.URL+"/cards/reorder", url.Values{
+		"card_id":   {"card_200"},
+		"before_id": {"card_100"},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", status, body)
+	}
+	moved := strings.Index(body, `data-card-id="card_200"`)
+	target := strings.Index(body, `data-card-id="card_100"`)
+	if moved < 0 || target < 0 || moved > target {
+		t.Errorf("Expected card_200 before card_100, got indexes %d and %d", moved, target)
+	}
+
+	status, body = post(t, ts.URL+"/cards/reorder", url.Values{
+		"card_id": {"card_200"}, "before_id": {""},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("Expected 200 while appending, got %d: %s", status, body)
+	}
+	moved = strings.Index(body, `data-card-id="card_200"`)
+	target = strings.Index(body, `data-card-id="card_100"`)
+	if moved < 0 || target < 0 || moved < target {
+		t.Errorf("Expected card_200 after card_100, got indexes %d and %d", moved, target)
 	}
 }
 

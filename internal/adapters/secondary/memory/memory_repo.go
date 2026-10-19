@@ -20,6 +20,7 @@ import (
 type memoryBoard struct {
 	columns []domain.Column
 	cards   map[string]bool // IDs of the cards that belong to this board
+	order   []string        // storage order; the board renders cards in it
 }
 
 type memoryRepo struct {
@@ -54,6 +55,7 @@ func NewMemoryRepo(boards ...MemoryBoard) ports.BoardRepository {
 		board := &memoryBoard{
 			columns: domain.SortColumns(seed.Columns),
 			cards:   make(map[string]bool, len(seed.Cards)),
+			order:   make([]string, 0, len(seed.Cards)),
 		}
 		for _, c := range seed.Cards {
 			if c.Version <= 0 {
@@ -61,6 +63,7 @@ func NewMemoryRepo(boards ...MemoryBoard) ports.BoardRepository {
 			}
 			m.cards[c.ID] = clone(c)
 			board.cards[c.ID] = true
+			board.order = append(board.order, c.ID)
 		}
 		m.boards = append(m.boards, domain.Board{ID: id, Name: seed.Name})
 		m.byID[id] = board
@@ -144,11 +147,11 @@ func (r *memoryRepo) GetAll(ctx context.Context, boardID string) ([]domain.Card,
 	}
 
 	result := make([]domain.Card, 0, len(board.cards))
-	for id := range board.cards {
-		result = append(result, clone(r.cards[id]))
+	for _, id := range board.order {
+		if board.cards[id] {
+			result = append(result, clone(r.cards[id]))
+		}
 	}
-	// Map iteration is random; keep the board stable between renders.
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, nil
 }
 
@@ -178,6 +181,7 @@ func (r *memoryRepo) Create(ctx context.Context, boardID string, card domain.Car
 		card.Version = 1
 	}
 	board.cards[card.ID] = true
+	board.order = append(board.order, card.ID)
 	r.cards[card.ID] = clone(card)
 	return clone(card), nil
 }
@@ -208,6 +212,9 @@ func (r *memoryRepo) UpdateColumn(ctx context.Context, boardID, cardID, columnID
 		return domain.ErrCardNotFound
 	}
 	c := clone(r.cards[cardID])
+	if c.ColumnID != columnID {
+		board.order = moveToEnd(board.order, cardID)
+	}
 	c.ColumnID = columnID
 	c.Version++
 	r.cards[cardID] = c
@@ -226,6 +233,7 @@ func (r *memoryRepo) DeleteCard(ctx context.Context, boardID, cardID string) err
 	}
 	delete(r.cards, cardID)
 	delete(board.cards, cardID)
+	board.order = removeID(board.order, cardID)
 	for id, card := range r.cards {
 		if card.DependsOnCard(cardID) {
 			kept := make([]string, 0, len(card.DependsOn))
@@ -328,12 +336,14 @@ func (r *memoryRepo) ReplaceBoard(ctx context.Context, boardID string, columns [
 	}
 	board.columns = domain.SortColumns(append([]domain.Column(nil), columns...))
 	board.cards = make(map[string]bool, len(cards))
+	board.order = make([]string, 0, len(cards))
 	for _, c := range cards {
 		if c.Version <= 0 {
 			c.Version = 1
 		}
 		r.cards[c.ID] = clone(c)
 		board.cards[c.ID] = true
+		board.order = append(board.order, c.ID)
 	}
 	return nil
 }

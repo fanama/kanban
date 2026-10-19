@@ -93,6 +93,48 @@ func TestSheetsRepoMoveWritesOneCell(t *testing.T) {
 	}
 }
 
+func TestSheetsRepoMoveCardBeforeRewritesTheRows(t *testing.T) {
+	rows := [][]any{
+		{"card_a", "Alpha", "To Do", "High"},
+		{"card_b", "Beta", "To Do", "Low"},
+		{"card_c", "Gamma", "Doing", "Low"},
+	}
+	fake, repo := newFakeRepo(t, Config{SheetName: "Sheet1"}, rows)
+	ctx := context.Background()
+
+	if err := repo.MoveCardBefore(ctx, "tab", "card_b", "card_a"); err != nil {
+		t.Fatalf("MoveCardBefore failed: %v", err)
+	}
+	assertSheetOrder(t, repo, []string{"card_b", "card_a", "card_c"})
+	if len(fake.updates) != 1 || fake.updates[0].Range != "Sheet1!A2:H4" {
+		t.Errorf("Expected one block rewrite, got %+v", fake.updates)
+	}
+
+	if err := repo.MoveCardBefore(ctx, "tab", "card_b", ""); err != nil {
+		t.Fatalf("MoveCardBefore to the end failed: %v", err)
+	}
+	assertSheetOrder(t, repo, []string{"card_a", "card_c", "card_b"})
+
+	if err := repo.MoveCardBefore(ctx, "tab", "card_b", "card_c"); !errors.Is(err, domain.ErrNotSameColumn) {
+		t.Errorf("Expected ErrNotSameColumn, got %v", err)
+	}
+}
+
+func assertSheetOrder(t *testing.T, repo *Repo, want []string) {
+	t.Helper()
+	cards, err := repo.GetAll(context.Background(), "tab")
+	if err != nil {
+		t.Fatalf("GetAll failed: %v", err)
+	}
+	var ids []string
+	for _, card := range cards {
+		ids = append(ids, card.ID)
+	}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("Expected the row order %v, got %v", want, ids)
+	}
+}
+
 func TestSheetsRepoResolvesFirstTabWhenUnset(t *testing.T) {
 	tabs := []tab{
 		{SheetID: 0, Title: "Feuille 1", Index: 0},

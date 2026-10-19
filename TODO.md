@@ -63,6 +63,10 @@ open items point at the next useful changes.
 - [x] **Render and transport cost:** `boardFacts` removes repeated full-board
       scans per card, a 200-card benchmark guards the path, and gzip,
       `Server-Timing` and slow-request logs make deployed latency visible.
+- [x] **Card order:** dropping on the upper or lower half of another card in
+      the same list inserts above or below it. SQLite stores a position column,
+      memory keeps an order slice, Sheets rewrites the visible rows, and the
+      live patch refreshes the whole column for every viewer.
 
 ## Next steps / ideas
 

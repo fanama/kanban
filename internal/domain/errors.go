@@ -38,4 +38,5 @@ var (
 	ErrEmptyColumnName = errors.New("column name must not be empty")
 	ErrColumnExists    = errors.New("column already exists")
 	ErrLastColumn      = errors.New("the board must keep at least one column")
+	ErrNotSameColumn   = errors.New("cards can only be reordered inside the same column")
 )

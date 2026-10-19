@@ -47,6 +47,11 @@ type CardService interface {
 	AddCard(ctx context.Context, boardID, columnID, title string, priority domain.Priority) (BoardChange, error)
 	UpdateCard(ctx context.Context, boardID string, card domain.Card) (BoardChange, error)
 	MoveCard(ctx context.Context, boardID, cardID, columnID string) (BoardChange, error)
+	// ReorderCard places cardID immediately before beforeCardID, which must be
+	// in the same column; an empty beforeCardID appends it at the end of that
+	// column. The stage rules are untouched: this only changes the order the
+	// cards are read in.
+	ReorderCard(ctx context.Context, boardID, cardID, beforeCardID string) (BoardChange, error)
 	// DeleteCard removes a card. Cards that depend on it keep their other
 	// constraints; this one is dropped from their lists.
 	DeleteCard(ctx context.Context, boardID, cardID string) (BoardChange, error)

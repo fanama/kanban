@@ -548,6 +548,12 @@ textarea { width: 100%; resize: vertical; }
   transform: rotate(1.5deg);
   box-shadow: none;
 }
+.card.drop-before {
+  box-shadow: 0 -3px 0 var(--accent), var(--shadow);
+}
+.card.drop-after {
+  box-shadow: 0 3px 0 var(--accent), var(--shadow);
+}
 
 .card-title {
   margin: 0;

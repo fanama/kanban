@@ -36,6 +36,16 @@ func (h *HTTPHandler) handleMoveCard(w http.ResponseWriter, r *http.Request) {
 	h.renderChange(w, r, change, boardID)
 }
 
+func (h *HTTPHandler) handleReorderCard(w http.ResponseWriter, r *http.Request) {
+	boardID := h.selectBoard(w, r)
+	change, err := h.cards.ReorderCard(r.Context(), boardID, r.FormValue("card_id"), r.FormValue("before_id"))
+	if err != nil {
+		http.Error(w, err.Error(), statusFor(err))
+		return
+	}
+	h.renderChange(w, r, change, boardID)
+}
+
 // handleGetCard returns the read-only card fragment, used to leave edit mode.
 func (h *HTTPHandler) handleGetCard(w http.ResponseWriter, r *http.Request) {
 	boardID := h.selectBoard(w, r)

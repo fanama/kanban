@@ -86,8 +86,8 @@ boards(id TEXT PRIMARY KEY, name TEXT NOT NULL)
 
 cards(id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
       objective TEXT NOT NULL, status TEXT NOT NULL, priority TEXT NOT NULL,
-      version INTEGER NOT NULL DEFAULT 1, created_at TIMESTAMP NOT NULL,
-      board_id TEXT NOT NULL)
+      position INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1,
+      created_at TIMESTAMP NOT NULL, board_id TEXT NOT NULL)
 
 card_dependencies(card_id TEXT REFERENCES cards(id) ON DELETE CASCADE,
                   depends_on_id TEXT REFERENCES cards(id) ON DELETE CASCADE,
@@ -110,7 +110,7 @@ longer read or written; it is simply left in place if your file still has it.
 
 Cards and columns survive restarts: the tables are created on first run (an
 empty database also gets the default columns `To Do | In Progress | Done` and
-two demo cards) and `GetAll` returns cards in insertion order. A `kanban.db`
+two demo cards) and `GetAll` returns cards in their stored order. A `kanban.db`
 created by an older version is upgraded in place on startup: the missing columns
 of `cards` are added (empty by default), the columns table is created, and the
 existing cards keep their stage. The file is in `.gitignore` — it is runtime
@@ -145,7 +145,8 @@ matching the URL's `gid` (or the first tab).
 The adapter writes the `ID | Title | Status | Priority | Description |
 Objective | BlockedBy | Version` header on first use (range `A1:H1`), reads
 cards from `A2:H`, and moving a card writes its column cell and the next
-version. The `Status` column holds the card's column ID — the name is the one a
+version. The visible row order is the card order, so dropping a card above
+another rewrites the rows. The `Status` column holds the card's column ID — the name is the one a
 spreadsheet written by an earlier version already has. `BlockedBy` holds the
 constraint card IDs separated by commas (semicolons and extra spaces are read
 too). Rows whose ID column is empty fall back to `row_<n>`, an unknown priority
@@ -220,7 +221,10 @@ build step and no external font or icon dependency.
 Desktop cards can be dragged between **adjacent** lists: backwards is always
 allowed, forwards only when the stage rule permits the advance (the same
 condition that enables the move button). A blocked list never accepts a drop;
-the server still enforces every rule. Touch devices use the move buttons.
+the server still enforces every rule. Dropping a card on the upper half of
+another card of the same list inserts it above; dropping on the lower half
+inserts it below (and below the last card appends it). The order is saved and
+shared through the live patch. Touch devices use the move buttons.
 
 Clicking a card title opens its read-only detail in a native `<dialog>`. The
 **Edit** button inside it swaps in the existing inline edit form; a successful
@@ -340,6 +344,7 @@ explicitly removes every constraint. The edit form always submits the field
 | `POST` | `/boards/{id}/delete` | Delete a board and everything on it (the last board stays) |
 | `POST` | `/cards` | Add a card (`title`, `priority`, optional `column_id`; defaults to the first list) |
 | `POST` | `/cards/move` | Move a card one stage (`card_id`, `column_id`) |
+| `POST` | `/cards/reorder` | Insert a card above another in the same list (`card_id`, `before_id`) |
 | `GET` | `/cards/{id}` | Read-only card fragment (leaves edit mode) |
 | `GET` | `/cards/{id}/edit` | Card edit form fragment |
 | `POST` | `/cards/{id}` | Save an edit (`title`, `description`, `objective`, `depends_on` (repeated), `column_id`, `priority`, `version`) |
